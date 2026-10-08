@@ -4,21 +4,20 @@ const cors = require('cors');
 const cookieSession = require('cookie-session');
 require('dotenv').config();
 const LetterTemplate = require('./models/LetterTemplate');
+const { getRuntimeConfig, validateRuntimeConfig } = require('./config/runtime');
 
 
 
 const app = express();
+const runtimeConfig = getRuntimeConfig();
+const configWarnings = validateRuntimeConfig(runtimeConfig);
+
+for (const warning of configWarnings) {
+  console.warn(`Configuration warning: ${warning}`);
+}
 
 // CORS configuration: allow local frontends on 5173 and 5174 by default, or comma-separated env
-const allowedOrigins = (process.env.FRONTEND_ORIGIN
-  ? process.env.FRONTEND_ORIGIN.split(',')
-  : [
-      'http://localhost:5173',
-      'http://localhost:5174',
-      'http://127.0.0.1:5173',
-      'http://127.0.0.1:5174',
-    ]
-).map((o) => o.trim());
+const allowedOrigins = runtimeConfig.frontendOrigins;
 
 app.use(
   cors({
@@ -46,32 +45,21 @@ app.use(express.json());
 app.use(
   cookieSession({
     name: 'session',
-    keys: [process.env.SESSION_SECRET || 'dev-secret'],
+    keys: [runtimeConfig.sessionSecret],
     maxAge: 24 * 60 * 60 * 1000,
-    httpOnly: false, // Allow JavaScript access for debugging
-    secure: false, // Set to false for localhost (HTTP)
-    sameSite: 'lax', // Allow cross-origin cookies
-    signed: false, // Disable signing for debugging
+    httpOnly: true,
+    secure: runtimeConfig.nodeEnv === 'production',
+    sameSite: runtimeConfig.nodeEnv === 'production' ? 'strict' : 'lax',
+    signed: true,
     overwrite: true, // Allow overwriting existing cookies
   })
 );
-
-// Debug middleware to log session info
-app.use((req, res, next) => {
-  console.log('🔍 Middleware - Session ID:', req.session.id);
-  console.log('🔍 Middleware - Session data:', JSON.stringify(req.session, null, 2));
-  console.log('🔍 Middleware - Cookies:', req.headers.cookie);
-  next();
-});
-
 
 
 // MongoDB connection
 async function connectDB() {
   try {
-    const mongoUri =
-      process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/hr_letters';
-    await mongoose.connect(mongoUri);
+    await mongoose.connect(runtimeConfig.mongoUri);
     console.log('✅ MongoDB connected');
     await seedDefaultTemplatesIfEmpty();
   } catch (err) {
@@ -79,7 +67,6 @@ async function connectDB() {
     process.exit(1);
   }
 }
-connectDB();
 
 async function seedDefaultTemplatesIfEmpty() {
   try {
@@ -126,11 +113,17 @@ async function seedDefaultTemplatesIfEmpty() {
   }
 }
 
-// Health check route
 app.get('/', (req, res) => {
   res.send('API is running');
 });
-
+app.get('/health', (req, res) => {
+  const databaseReady = mongoose.connection.readyState === 1;
+  res.status(databaseReady ? 200 : 503).json({
+    status: databaseReady ? 'ok' : 'degraded',
+    database: databaseReady ? 'connected' : 'disconnected',
+    environment: runtimeConfig.nodeEnv,
+  });
+});
 // Test session route
 app.get('/test-session', (req, res) => {
   req.session.testValue = 'test-' + Date.now();
@@ -179,8 +172,15 @@ process.on('SIGINT', async () => {
   process.exit(0);
 });
 
-// Start server
-const PORT = process.env.PORT || 4000;
-app.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT}`);
-});
+function startServer() {
+  return app.listen(runtimeConfig.port, () => {
+    console.log(`🚀 Server running on port ${runtimeConfig.port}`);
+  });
+}
+
+if (require.main === module) {
+  connectDB();
+  startServer();
+}
+
+module.exports = { app, connectDB, startServer };
