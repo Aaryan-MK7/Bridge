@@ -1,0 +1,25 @@
+# Dependencies and build output
+node_modules/
+dist/
+coverage/
+
+# Runtime configuration
+.env
+.env.*
+!.env.example
+
+# Application-generated files and uploads
+server/generated-letters/
+server/uploads/
+server/employees.csv
+
+# Sensitive signing material
+*.pem
+*.key
+server/privatekey/
+
+# Local tooling
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json

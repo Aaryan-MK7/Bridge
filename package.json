@@ -1,0 +1,19 @@
+{
+  "name": "bridge",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Internal request and approval portal",
+  "workspaces": [
+    "client",
+    "server"
+  ],
+  "scripts": {
+    "build": "npm run build --workspace=client",
+    "lint": "npm run lint --workspace=client",
+    "start:client": "npm run dev --workspace=client",
+    "start:server": "npm run start --workspace=server"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
