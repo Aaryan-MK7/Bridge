@@ -21,7 +21,9 @@ Bridge is a compact internal portal for collecting structured employee requests 
 6. Open `http://localhost:5173`.
 
 ## Checks
-Run `npm run lint` and `npm run build` before deployment.
+Run `npm run lint`, `npm run build`, and `npm run test --workspace=server` before deployment.
+
+The API exposes `GET /health` for process checks. It returns `200` when MongoDB is connected and `503` with a `degraded` status while the database is unavailable.
 
 ## Configuration
 No credentials, private signing keys, employee records, or generated documents are included. Configure those through local environment files and the application's administrative workflows.
