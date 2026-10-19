@@ -491,7 +491,7 @@ class DocuSignService {
 
       // Step 3. Create the recipient view for admin signing
       let viewRequest = this.makeRecipientViewRequest({
-        dsReturnUrl: envelopeData.dsReturnUrl || `${process.env.FRONTEND_ORIGIN?.split(',')[0] || 'http://localhost:5173'}/docusign/callback`,
+        dsReturnUrl: envelopeData.dsReturnUrl || `${process.env.FRONTEND_ORIGIN?.split(',')[0] || 'http://localhost:5173'}/admin/integrations`,
         signerEmail: envelopeData.recipients[0]?.email,
         signerName: envelopeData.recipients[0]?.name,
         signerClientId: envelopeData.recipients[0]?.clientUserId || '1000',

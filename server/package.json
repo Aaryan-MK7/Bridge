@@ -4,6 +4,8 @@
   "description": "Bridge API",
   "main": "index.js",
   "scripts": {
+    "bootstrap:admin": "node scripts/createAdmin.js",
+    "smoke:live": "node scripts/liveSmoke.js",
     "start": "node index.js",
     "test": "node --test"
   },

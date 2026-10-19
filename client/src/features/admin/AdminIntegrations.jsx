@@ -68,7 +68,7 @@ export default function AdminIntegrations() {
         await loadIntegration();
       }
     } catch (error) {
-      const consentUrl = error.payload?.consentUrl;
+      const consentUrl = error.payload?.error?.details?.consentUrl;
       if (consentUrl && openTrustedUrl(consentUrl)) {
         setNotice('Grant consent in the new tab, then connect again.');
       } else {

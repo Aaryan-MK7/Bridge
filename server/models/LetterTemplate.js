@@ -4,7 +4,8 @@ const fieldSchema = new mongoose.Schema(
   {
     name: { type: String, required: true },
     label: { type: String, required: true },
-    type: { type: String, enum: ['text', 'number', 'date'], default: 'text' },
+    type: { type: String, enum: ['text', 'number', 'date', 'email'], default: 'text' },
+    required: { type: Boolean, default: true },
   },
   { _id: false }
 );

@@ -223,7 +223,7 @@ export default function AdminRequests() {
                   </>
                 ) : null}
               </div>
-              {selected.status === 'letter_generated' ? (
+              {['approved', 'letter_generated'].includes(selected.status) ? (
                 <Button
                   loading={working === selected._id}
                   onClick={() => sendToDocuSign(selected)}

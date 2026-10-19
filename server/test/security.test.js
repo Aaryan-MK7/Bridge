@@ -5,6 +5,7 @@ const { safeLetterRequestDto } = require('../domain/letterRequests');
 const {
   canTransitionRequestStatus,
 } = require('../domain/requestStatus');
+const { parseEmployeeRequestInput } = require('../routes/letterRequests');
 const { createTokenService } = require('../services/tokenService');
 const {
   sanitizeDetails,
@@ -79,4 +80,21 @@ test('input validation normalizes safe values and rejects weak input', () => {
   assert.throws(() => validatePassword('short'));
   assert.throws(() => validateEmail('not-an-email'));
   assert.throws(() => sanitizeDetails({ nested: { unsafe: true } }));
+});
+
+test('letter request input preserves sanitized address and comments', () => {
+  assert.deepEqual(
+    parseEmployeeRequestInput({
+      letterType: ' visa ',
+      address: '  10 Bridge Street  ',
+      employeeComments: ' For the consulate ',
+      details: { country: ' Canada ' },
+    }),
+    {
+      letterType: 'visa',
+      address: '10 Bridge Street',
+      employeeComments: 'For the consulate',
+      details: { country: 'Canada' },
+    }
+  );
 });

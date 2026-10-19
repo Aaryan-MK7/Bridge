@@ -7,7 +7,7 @@ const {
   validateObjectId,
 } = require('../utils/validation');
 
-const FIELD_TYPES = new Set(['text', 'number', 'date']);
+const FIELD_TYPES = new Set(['text', 'number', 'date', 'email']);
 
 function createTemplatesRouter({ LetterTemplate, auth }) {
   const router = express.Router();
@@ -107,7 +107,7 @@ function validateFields(fields) {
       throw new AppError(400, 'VALIDATION_ERROR', `Duplicate template field: ${name}`);
     }
     seen.add(name);
-    return { name, label, type };
+    return { name, label, type, required: field.required !== false };
   });
 }
 

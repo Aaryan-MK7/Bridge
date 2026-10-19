@@ -67,5 +67,9 @@ test('request validation reports missing dynamic fields', () => {
 
 test('API errors and letter labels are normalized for display', () => {
   assert.equal(getApiErrorMessage({ error: 'Access denied' }), 'Access denied');
+  assert.equal(
+    getApiErrorMessage({ error: { code: 'ADMIN_REQUIRED', message: 'Administrator access is required' } }),
+    'Administrator access is required',
+  );
   assert.equal(formatLetterType('travel_noc'), 'Travel Noc');
 });

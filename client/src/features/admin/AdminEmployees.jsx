@@ -22,6 +22,7 @@ const blankEmployee = {
   title: '',
   startDate: '',
   address: '',
+  password: '',
 };
 
 export default function AdminEmployees() {
@@ -65,6 +66,7 @@ export default function AdminEmployees() {
         title: newEmployee.title.trim(),
         startDate: newEmployee.startDate || undefined,
         address: newEmployee.address.trim(),
+        password: newEmployee.password,
       });
       setShowCreate(false);
       setNewEmployee(blankEmployee);
@@ -210,6 +212,7 @@ export default function AdminEmployees() {
               ['title', 'Job title', 'text', false],
               ['startDate', 'Start date', 'date', false],
               ['address', 'Home address', 'text', false],
+              ['password', 'Temporary password', 'password', true],
             ].map(([name, label, type, required]) => (
               <Field
                 key={name}

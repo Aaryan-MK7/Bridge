@@ -76,6 +76,7 @@ function createApp(options = {}) {
     letterGenerator,
     emailService,
     docusignRegistry,
+    Setting: models.Setting,
     config,
   }));
   app.use('/api/templates', createTemplatesRouter({
@@ -86,6 +87,7 @@ function createApp(options = {}) {
   app.use('/api/settings', createSettingsRouter({
     Setting: models.Setting,
     auth,
+    emailService,
   }));
   app.use('/api/docusign', createDocuSignRouter({
     auth,

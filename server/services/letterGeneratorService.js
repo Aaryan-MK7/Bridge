@@ -5,11 +5,13 @@ const fs = require('fs');
 const path = require('path');
 
 class LetterGeneratorService {
-  constructor() {
-    // Prefer root-level public/templates; fallback to backend/public/templates
-    const rootTemplates = path.join(__dirname, '../../../public/templates');
-    const backendTemplates = path.join(__dirname, '../../public/templates');
-    this.templatesPath = fs.existsSync(rootTemplates) ? rootTemplates : backendTemplates;
+  constructor(options = {}) {
+    const rootTemplates = path.join(__dirname, '../../public/templates');
+    const serverTemplates = path.join(__dirname, '../public/templates');
+    this.templatesPath = options.templatesPath
+      || (fs.existsSync(rootTemplates) ? rootTemplates : serverTemplates);
+    this.outputPath = options.outputPath
+      || path.join(__dirname, '../generated-letters');
   }
 
   // Get the template file path for a letter type
@@ -115,6 +117,7 @@ class LetterGeneratorService {
       EMPLOYEE_ID: employeeDetails.employeeId || 'N/A',
       REQUEST_DATE: new Date(employeeDetails.requestDate).toLocaleDateString(),
       LETTER_TYPE: employeeDetails.letterType || 'N/A',
+      ADDRESS: employeeDetails.address || 'N/A',
       ADDITIONAL_DETAILS: additionalDetails,
       EMPLOYEE_COMMENTS: employeeComments,
       DEPARTMENT: department,
@@ -139,6 +142,7 @@ class LetterGeneratorService {
       add('employee_id', base.EMPLOYEE_ID); add('EmployeeID', base.EMPLOYEE_ID); add('EmployeeId', base.EMPLOYEE_ID);
       add('request_date', base.REQUEST_DATE); add('RequestDate', base.REQUEST_DATE);
       add('letter_type', base.LETTER_TYPE); add('LetterType', base.LETTER_TYPE);
+      add('address', base.ADDRESS); add('Address', base.ADDRESS);
       add('additional_details', base.ADDITIONAL_DETAILS); add('AdditionalDetails', base.ADDITIONAL_DETAILS);
       add('employee_comments', base.EMPLOYEE_COMMENTS); add('EmployeeComments', base.EMPLOYEE_COMMENTS);
       add('department', base.DEPARTMENT); add('Department', base.DEPARTMENT);
@@ -176,12 +180,7 @@ class LetterGeneratorService {
         const doc = new Docxtemplater(zip, { paragraphLoop: true, linebreaks: true });
         const data = this.buildTemplateData(employeeDetails);
         doc.setData(data);
-        try {
-          doc.render();
-        } catch (renderError) {
-          console.error('Docxtemplater render error:', renderError);
-          throw renderError;
-        }
+        doc.render();
         return doc.getZip().generate({ type: 'nodebuffer' });
       }
 
@@ -204,8 +203,9 @@ class LetterGeneratorService {
 
       return zip.generate({ type: 'nodebuffer' });
     } catch (error) {
-      console.error('❌ Error generating letter from template:', error);
-      throw new Error(`Failed to generate letter from template: ${error.message}`);
+      throw new Error(`Failed to generate letter from template: ${error.message}`, {
+        cause: error,
+      });
     }
   }
 
@@ -635,11 +635,10 @@ class LetterGeneratorService {
   // Generate DOCX file and return buffer
   async generateDocxLetter(letterType, employeeDetails) {
     try {
-      // Always fill the provided template; do not generate a fresh layout
       return await this.generateLetterFromTemplate(letterType, employeeDetails);
     } catch (error) {
-      console.error('Error generating DOCX letter:', error);
-      throw new Error('Failed to generate DOCX letter');
+      console.warn(`Template generation unavailable; using the built-in layout: ${error.message}`);
+      return Packer.toBuffer(this.generateLetterContent(letterType, employeeDetails));
     }
   }
 
@@ -652,13 +651,11 @@ class LetterGeneratorService {
   async generateAndSaveLetter(letterType, employeeDetails, filename) {
     try {
       const buffer = await this.generateDocxLetter(letterType, employeeDetails);
-      const filePath = path.join(this.templatesPath, filename);
-
-      // Ensure directory exists
-      if (!fs.existsSync(this.templatesPath)) {
-        fs.mkdirSync(this.templatesPath, { recursive: true });
+      if (!fs.existsSync(this.outputPath)) {
+        fs.mkdirSync(this.outputPath, { recursive: true });
       }
 
+      const filePath = path.join(this.outputPath, filename);
       fs.writeFileSync(filePath, buffer);
 
       return filePath;

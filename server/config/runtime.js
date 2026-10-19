@@ -16,6 +16,7 @@ function getRuntimeConfig(env = process.env) {
     mongoUri: env.MONGO_URI || DEFAULT_MONGO_URI,
     frontendOrigins,
     frontendUrl: env.FRONTEND_URL || frontendOrigins[0] || DEFAULT_FRONTEND_ORIGIN,
+    adminEmail: env.ADMIN_EMAIL || '',
     jwtSecret: env.JWT_SECRET || DEFAULT_JWT_SECRET,
     jwtExpiresIn: env.JWT_EXPIRES_IN || DEFAULT_JWT_EXPIRES_IN,
     nodeEnv: env.NODE_ENV || 'development',

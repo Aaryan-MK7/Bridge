@@ -84,7 +84,7 @@ export async function apiRequest(path, options = {}) {
     response = await fetch(`${API_URL}${path}`, {
       ...requestOptions,
       body: body === undefined || isFormData ? body : JSON.stringify(body),
-      credentials: 'include',
+      credentials: 'omit',
       headers,
       signal,
     });

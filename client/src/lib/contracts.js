@@ -47,7 +47,13 @@ export function parseLoginResponse(payload) {
 export function getApiErrorMessage(payload, fallback = 'Something went wrong. Please try again.') {
   if (typeof payload === 'string' && payload.trim()) return payload.trim();
   if (!payload || typeof payload !== 'object') return fallback;
-  return payload.message || payload.error || payload.details || fallback;
+  if (typeof payload.message === 'string' && payload.message.trim()) return payload.message;
+  if (typeof payload.error === 'string' && payload.error.trim()) return payload.error;
+  if (typeof payload.error?.message === 'string' && payload.error.message.trim()) {
+    return payload.error.message;
+  }
+  if (typeof payload.details === 'string' && payload.details.trim()) return payload.details;
+  return fallback;
 }
 
 export function validateLetterRequest({ letterType, details = {}, fields = [] }) {

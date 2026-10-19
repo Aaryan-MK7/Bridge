@@ -89,8 +89,8 @@ export const templateApi = {
 };
 
 export const settingsApi = {
-  getSmtp: () => apiRequest('/api/settings/smtp'),
-  updateSmtp: (settings) => apiRequest('/api/settings/smtp', {
+  getNotifications: () => apiRequest('/api/settings/notifications'),
+  updateNotifications: (settings) => apiRequest('/api/settings/notifications', {
     method: 'PUT',
     body: settings,
   }),

@@ -15,7 +15,7 @@ function createDocuSignRouter({ auth, docusignRegistry, config }) {
     const code = requiredString(req.query.code, 'code', { maxLength: 4000 });
     const state = requiredString(req.query.state, 'state', { maxLength: 256 });
     await docusignRegistry.completeOAuth({ code, state });
-    const redirect = new URL('/docusign/callback', config.frontendUrl);
+    const redirect = new URL('/admin/integrations', config.frontendUrl);
     redirect.searchParams.set('success', 'true');
     res.redirect(redirect.toString());
   }));
@@ -151,7 +151,7 @@ function createDocuSignRouter({ auth, docusignRegistry, config }) {
           || 'Please sign this document',
         anchorString: optionalString(req.body.anchorString, 'anchorString', { maxLength: 100 })
           || '/sn1/',
-        dsReturnUrl: `${config.frontendUrl}/docusign/callback`,
+        dsReturnUrl: `${config.frontendUrl}/admin/integrations`,
       };
       res.status(201).json(await service.sendEnvelopeForEmbeddedSigning(envelopeArgs));
     })
@@ -206,7 +206,7 @@ function createDocuSignRouter({ auth, docusignRegistry, config }) {
         id,
         recipientEmail,
         recipientName,
-        `${config.frontendUrl}/docusign/callback`
+        `${config.frontendUrl}/admin/integrations`
       );
       res.json({ signingUrl });
     })

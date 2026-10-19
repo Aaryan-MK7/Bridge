@@ -23,6 +23,7 @@ function createLetterRequestsRouter({
   letterGenerator,
   emailService,
   docusignRegistry,
+  Setting,
   config,
 }) {
   const router = express.Router();
@@ -36,6 +37,7 @@ function createLetterRequestsRouter({
       employeeName: req.employee.name,
       letterType: input.letterType,
       details: input.details,
+      address: input.address,
       employeeComments: input.employeeComments,
       status: 'pending',
     });
@@ -48,10 +50,11 @@ function createLetterRequestsRouter({
       documentWarning = 'The request was saved, but its document could not be generated.';
     }
 
-    if (config.adminEmail) {
+    const notificationEmail = await getNotificationEmail(Setting, config.adminEmail);
+    if (notificationEmail) {
       await emailService.sendLetterRequestNotification(
         safeLetterRequestDto(request),
-        config.adminEmail
+        notificationEmail
       );
     }
 
@@ -65,12 +68,21 @@ function createLetterRequestsRouter({
     if (!configStatus.fullyConfigured) {
       throw new AppError(503, 'EMAIL_UNAVAILABLE', 'Email notifications are not configured');
     }
+    const notificationEmail = await getNotificationEmail(Setting, config.adminEmail)
+      || req.employee.email;
+    if (!notificationEmail) {
+      throw new AppError(
+        400,
+        'NOTIFICATION_EMAIL_REQUIRED',
+        'Set an operations notification email or add an email to your administrator profile'
+      );
+    }
     const result = await emailService.sendLetterRequestNotification({
       employeeId: req.employee.employeeId,
       employeeName: req.employee.name,
       letterType: 'Configuration test',
       requestDate: new Date(),
-    }, config.adminEmail || req.employee.email);
+    }, notificationEmail);
     res.json({ success: Boolean(result.success), configStatus });
   }));
 
@@ -229,7 +241,7 @@ function createLetterRequestsRouter({
       request.docusignEnvelopeId,
       req.employee.email,
       req.employee.name,
-      `${config.frontendUrl}/docusign/callback`
+      `${config.frontendUrl}/admin/requests`
     );
     res.json({
       signingUrl,
@@ -259,6 +271,9 @@ function createLetterRequestsRouter({
       request.letterType = requiredString(req.body.letterType, 'letterType', { maxLength: 120 });
     }
     if (req.body.details !== undefined) request.details = sanitizeDetails(req.body.details);
+    if (req.body.address !== undefined) {
+      request.address = optionalString(req.body.address, 'address', { maxLength: 2000 }) || '';
+    }
     if (req.body.employeeComments !== undefined) {
       request.employeeComments = optionalString(
         req.body.employeeComments,
@@ -292,6 +307,7 @@ function parseEmployeeRequestInput(body) {
   return {
     letterType: requiredString(body.letterType, 'letterType', { maxLength: 120 }),
     details: sanitizeDetails(body.details),
+    address: optionalString(body.address, 'address', { maxLength: 2000 }) || '',
     employeeComments: optionalString(
       body.employeeComments ?? body.comments,
       'employeeComments',
@@ -311,6 +327,7 @@ async function generateLetter({ request, letterGenerator }) {
       letterType: request.letterType,
       requestDate: request.requestDate,
       details: request.details || {},
+      address: request.address || '',
       employeeComments: request.employeeComments || '',
     },
     filename
@@ -355,7 +372,7 @@ async function sendToDocuSign({
     documentName: safeFilename(request.generatedLetterFilename),
     emailSubject: `Please sign ${request.employeeName}'s ${request.letterType} letter`,
     anchorString: '/sn1/',
-    dsReturnUrl: `${config.frontendUrl}/docusign/callback`,
+    dsReturnUrl: `${config.frontendUrl}/admin/requests`,
   });
 
   assertTransition(request.status, 'sent_for_signing');
@@ -390,6 +407,11 @@ async function notifyStatusChange({ request, Employee, emailService, adminEmail 
   } else {
     await emailService.sendLetterRejectionNotification(data, adminEmail, request.adminNotes);
   }
+}
+
+async function getNotificationEmail(Setting, fallbackEmail = '') {
+  const setting = await Setting.findOne({ key: 'notifications' }).lean();
+  return setting?.value?.adminEmail || fallbackEmail || '';
 }
 
 async function findRequestOrThrow(LetterRequest, id) {

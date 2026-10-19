@@ -16,7 +16,6 @@ const {
 
 const MAX_CSV_BYTES = 2 * 1024 * 1024;
 const MAX_CSV_ROWS = 5000;
-const MASKED_PASSWORD = /^\*+$/;
 
 function createEmployeesRouter({
   Employee,
@@ -128,11 +127,8 @@ function createEmployeesRouter({
   router.post('/', auth.requireAdmin, asyncHandler(async (req, res) => {
     requireObject(req.body);
     const employeeData = parseEmployeeInput(req.body, { allowRole: true });
-    const password = optionalString(req.body.password, 'password', { maxLength: 128 });
-    if (password && !MASKED_PASSWORD.test(password)) {
-      validatePassword(password);
-      employeeData.passwordHash = await bcrypt.hash(password, 12);
-    }
+    const password = validatePassword(req.body.password, 'password');
+    employeeData.passwordHash = await bcrypt.hash(password, 12);
 
     const employee = await Employee.create(employeeData);
     res.status(201).json(safeEmployeeDto(employee));
