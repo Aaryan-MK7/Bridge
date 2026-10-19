@@ -3,15 +3,39 @@ const router = express.Router();
 const { PDFDocument, rgb, StandardFonts } = require('pdf-lib');
 const fs = require('fs').promises;
 const path = require('path');
+const { AppError, asyncHandler } = require('../middleware/errors');
+const {
+  optionalString,
+  requireObject,
+  requiredString,
+  sanitizeDetails,
+} = require('../utils/validation');
 
-// Route to get filled PDF template
-router.post('/fill-template', async (req, res) => {
+function createPdfFillerRouter({ auth }) {
+  const protectedRouter = express.Router();
+  protectedRouter.use(auth.requireAuth);
+  protectedRouter.use(router);
+  return protectedRouter;
+}
+
+router.post('/fill-template', asyncHandler(async (req, res) => {
   try {
-    const { letterType, employeeData } = req.body;
-
-    if (!letterType || !employeeData) {
-      return res.status(400).json({ error: "Missing required fields" });
-    }
+    requireObject(req.body);
+    const letterType = requiredString(req.body.letterType, 'letterType', { maxLength: 120 });
+    const input = requireObject(req.body.employeeData, 'employeeData');
+    const employeeData = {
+      letterType,
+      employeeId: req.employee.employeeId,
+      employeeName: req.employee.name,
+      employeeAddress: req.employee.address || '',
+      address: req.employee.address || '',
+      details: sanitizeDetails(input.details),
+      employeeComments: optionalString(
+        input.employeeComments ?? input.comments,
+        'employeeComments',
+        { maxLength: 4000 }
+      ) || '',
+    };
 
     // Map incoming letterType to actual filename basenames in public/templates
     const typeToFilename = {
@@ -26,8 +50,10 @@ router.post('/fill-template', async (req, res) => {
       certification_reimbursement: 'certification_reimbursement',
       travel_noc_letter: 'travel_noc',
     };
-
-    const baseName = typeToFilename[letterType] || letterType;
+    const baseName = typeToFilename[letterType];
+    if (!baseName) {
+      throw new AppError(400, 'INVALID_LETTER_TYPE', 'Unsupported letter type');
+    }
     // Get the template path
     const templatePath = path.join(__dirname, '../..', 'public', 'templates', `${baseName}.pdf`);
 
@@ -59,15 +85,18 @@ router.post('/fill-template', async (req, res) => {
 
     // Set response headers for PDF download
     res.setHeader('Content-Type', 'application/pdf');
-    res.setHeader('Content-Disposition', `attachment; filename="${employeeData.employeeName}_${letterType}_filled.pdf"`);
+    const filename = `${employeeData.employeeName}_${letterType}_filled.pdf`
+      .replace(/[^A-Za-z0-9._-]/g, '_');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
 
     res.send(Buffer.from(filledPdfBytes));
 
   } catch (error) {
+    if (error instanceof AppError) throw error;
     console.error('Error filling PDF template:', error);
     res.status(500).json({ error: "Failed to fill PDF template" });
   }
-});
+}));
 
 // Function to add text overlay to PDF page
 async function addTextOverlay(pdfDoc, page, letterType, employeeData, pageWidth, pageHeight) {
@@ -344,4 +373,4 @@ async function addTextOverlay(pdfDoc, page, letterType, employeeData, pageWidth,
   }
 }
 
-module.exports = router;
+module.exports = { addTextOverlay, createPdfFillerRouter };

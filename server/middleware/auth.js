@@ -1,63 +1,49 @@
-// backend/middleware/auth.js
-const jwt = require('jsonwebtoken');
-const Employee = require('../models/Employee');
+const { AppError, asyncHandler } = require('./errors');
 
-const auth = async (req, res, next) => {
-  try {
-    const authHeader = req.header('Authorization');
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      return res.status(401).json({ error: 'Authentication token missing or invalid' });
+function createAuthMiddleware({ Employee, tokenService }) {
+  const requireAuth = asyncHandler(async (req, res, next) => {
+    const header = req.get('Authorization') || '';
+    const match = /^Bearer ([^\s]+)$/.exec(header);
+    if (!match) {
+      throw new AppError(401, 'AUTH_REQUIRED', 'A valid bearer token is required');
     }
 
-    const token = authHeader.replace('Bearer ', '');
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    let claims;
+    try {
+      claims = tokenService.verify(match[1]);
+    } catch {
+      throw new AppError(401, 'INVALID_TOKEN', 'The authentication token is invalid or expired');
+    }
 
-    const employee = await Employee.findOne({
-      _id: decoded.id,
-      'tokens.token': token
-    });
-
+    const employee = await Employee.findById(claims.sub);
     if (!employee) {
-      return res.status(401).json({ error: 'Invalid authentication token' });
+      throw new AppError(401, 'INVALID_TOKEN', 'The authentication token is no longer valid');
     }
 
-    req.token = token;
+    req.auth = { claims, token: match[1] };
     req.employee = employee;
     next();
-  } catch (e) {
-    res.status(401).json({ error: 'Please authenticate' });
-  }
-};
+  });
 
-const adminAuth = async (req, res, next) => {
-  try {
-    const authHeader = req.header('Authorization');
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      return res.status(403).json({ error: 'Admin authentication token missing or invalid' });
+  function requireAdmin(req, res, next) {
+    if (!req.employee || req.employee.role !== 'admin') {
+      return next(new AppError(403, 'ADMIN_REQUIRED', 'Administrator access is required'));
     }
-
-    const token = authHeader.replace('Bearer ', '');
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-
-    const employee = await Employee.findOne({
-      _id: decoded.id,
-      'tokens.token': token,
-      role: 'admin'
-    });
-
-    if (!employee) {
-      return res.status(403).json({ error: 'Admin access required' });
-    }
-
-    req.token = token;
-    req.employee = employee;
-    next();
-  } catch (e) {
-    res.status(403).json({ error: 'Admin access required' });
+    return next();
   }
-};
 
-module.exports = {
-  requireAuth: auth,
-  requireAdmin: adminAuth
-};
+  function requireSelfOrAdmin(param = 'employeeId') {
+    return function enforceSelfOrAdmin(req, res, next) {
+      const targetEmployeeId = String(req.params[param] || '').trim();
+      const isSelf = String(req.employee?.employeeId || '') === targetEmployeeId;
+      if (!isSelf && req.employee?.role !== 'admin') {
+        return next(new AppError(403, 'FORBIDDEN', 'You may only access your own employee record'));
+      }
+      return next();
+    };
+  }
+
+  return { requireAdmin, requireAuth, requireSelfOrAdmin };
+}
+
+module.exports = { createAuthMiddleware };

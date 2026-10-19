@@ -1,470 +1,242 @@
 const express = require('express');
-const router = express.Router();
-const DocuSignService = require('../services/docusignService');
-const crypto = require('crypto');
+const { AppError, asyncHandler } = require('../middleware/errors');
+const {
+  optionalString,
+  requireObject,
+  requiredString,
+} = require('../utils/validation');
 
-// Store DocuSign service instances per session
-const docusignServices = new Map();
+function createDocuSignRouter({ auth, docusignRegistry, config }) {
+  const router = express.Router();
 
-// Middleware to get or create DocuSign service for session
-const getDocuSignService = (req, res, next) => {
-  const sessionId = req.session.id || 'default';
+  // DocuSign redirects here without Bridge's bearer token. The one-time state is
+  // validated and consumed by the server-side registry before any token exchange.
+  router.get('/callback', asyncHandler(async (req, res) => {
+    const code = requiredString(req.query.code, 'code', { maxLength: 4000 });
+    const state = requiredString(req.query.state, 'state', { maxLength: 256 });
+    await docusignRegistry.completeOAuth({ code, state });
+    const redirect = new URL('/docusign/callback', config.frontendUrl);
+    redirect.searchParams.set('success', 'true');
+    res.redirect(redirect.toString());
+  }));
 
-  if (!docusignServices.has(sessionId)) {
-    docusignServices.set(sessionId, new DocuSignService());
-  }
+  // Provider health pings carry no trusted state and intentionally expose no data.
+  router.post('/ping', (req, res) => res.status(204).end());
 
-  req.docusignService = docusignServices.get(sessionId);
-  next();
-};
+  router.use(auth.requireAuth, auth.requireAdmin);
 
-// Get OAuth authorization URL
-router.get('/auth', getDocuSignService, async (req, res) => {
-  try {
-    // Try JWT authentication first
+  router.get('/auth', asyncHandler(async (req, res) => {
+    const service = serviceFor(docusignRegistry, req.employee);
     try {
-      console.log('🔐 Auth - Attempting JWT authentication...');
-      await req.docusignService.authenticateWithJWT();
+      await service.authenticateWithJWT();
+      return res.json({
+        success: true,
+        method: 'JWT',
+        accountId: service.getCurrentAccountId(),
+      });
+    } catch {
+      const { authUrl } = docusignRegistry.beginOAuth(String(req.employee._id));
+      return res.json({
+        success: false,
+        method: 'OAuth',
+        fallback: true,
+        authUrl,
+      });
+    }
+  }));
 
-      // If JWT succeeds, return success
+  router.post('/auth/jwt', asyncHandler(async (req, res) => {
+    const service = serviceFor(docusignRegistry, req.employee);
+    try {
+      await service.authenticateWithJWT();
       res.json({
         success: true,
-        message: 'Successfully authenticated with JWT',
         method: 'JWT',
-        accountId: req.docusignService.getCurrentAccountId()
+        accountId: service.getCurrentAccountId(),
       });
-    } catch (jwtError) {
-      console.log('🔐 Auth - JWT failed, falling back to OAuth:', jwtError.message);
-
-      // Fallback to OAuth
-      const { authUrl, state } = req.docusignService.getAuthUrl();
-
-      // Store state in session for verification
-      req.session.docusignState = state;
-
-      // Debug logging
-      console.log('🔐 OAuth Auth - Generated state:', state);
-      console.log('🔐 OAuth Auth - Session ID:', req.session.id);
-      console.log('🔐 OAuth Auth - Stored state in session:', req.session.docusignState);
-
-      res.json({
-        authUrl,
-        state,
-        method: 'OAuth',
-        fallback: true
-      });
+    } catch (error) {
+      if (error?.type === 'consent_required') {
+        throw new AppError(
+          403,
+          'DOCUSIGN_CONSENT_REQUIRED',
+          'DocuSign consent is required',
+          { consentUrl: error.consentUrl, scopes: error.scopes }
+        );
+      }
+      throw new AppError(503, 'DOCUSIGN_UNAVAILABLE', 'DocuSign authentication is unavailable');
     }
-  } catch (error) {
-    console.error('Error in auth:', error);
-    res.status(500).json({ error: error.message });
-  }
-});
+  }));
 
-// New JWT authentication endpoint
-router.post('/auth/jwt', getDocuSignService, async (req, res) => {
-  try {
-    console.log('🔐 JWT Auth - Direct JWT authentication request');
-
-    await req.docusignService.authenticateWithJWT();
-
-    // Store authentication info in session
-    req.session.docusignAuthenticated = true;
-    req.session.docusignAccessToken = req.docusignService.getAccessToken();
-    req.session.docusignAccountId = req.docusignService.getCurrentAccountId();
-    req.session.docusignMethod = 'JWT';
-
+  router.get('/consent-url', asyncHandler(async (req, res) => {
+    const service = serviceFor(docusignRegistry, req.employee);
     res.json({
-      success: true,
-      message: 'Successfully authenticated with JWT',
-      method: 'JWT',
-      accountId: req.session.docusignAccountId
+      consentUrl: service.getConsentUrl(),
+      scopes: `${service.scopes} impersonation`,
     });
-  } catch (error) {
-    console.error('JWT authentication error:', error);
+  }));
 
-    // Handle consent required error
-    if (error.type === 'consent_required') {
-      res.status(403).json({
-        error: 'consent_required',
-        message: error.message,
-        consentUrl: error.consentUrl,
-        scopes: error.scopes,
-        instructions: 'User consent is required. Please visit the consent URL to grant permissions.'
-      });
-    } else {
-      res.status(500).json({ error: error.message });
-    }
-  }
-});
-
-// Get consent URL for JWT authentication
-router.get('/consent-url', getDocuSignService, (req, res) => {
-  try {
-    const consentUrl = req.docusignService.getConsentUrl();
+  router.get('/status', asyncHandler(async (req, res) => {
+    const service = serviceFor(docusignRegistry, req.employee);
     res.json({
-      consentUrl,
-      scopes: req.docusignService.scopes + ' impersonation',
-      instructions: 'Visit this URL to grant consent for JWT authentication'
+      authenticated: Boolean(service.isAuthenticated()),
+      accountId: service.isAuthenticated() ? service.getCurrentAccountId() : null,
     });
-  } catch (error) {
-    console.error('Error getting consent URL:', error);
-    res.status(500).json({ error: error.message });
-  }
-});
+  }));
 
-// OAuth callback
-router.get('/callback', getDocuSignService, async (req, res) => {
-  try {
-    const { code, state } = req.query;
+  router.get('/templates', withService(docusignRegistry, async (service, req, res) => {
+    res.json(await service.getTemplates());
+  }));
 
-    // Debug logging
-    console.log('🔐 OAuth Callback - Received state:', state);
-    console.log('🔐 OAuth Callback - Session ID:', req.session.id);
-    console.log('🔐 OAuth Callback - Stored state in session:', req.session.docusignState);
-    console.log('🔐 OAuth Callback - Session data:', JSON.stringify(req.session, null, 2));
+  router.get('/templates/:id', withService(docusignRegistry, async (service, req, res) => {
+    const id = requiredString(req.params.id, 'template id', { maxLength: 200 });
+    res.json(await service.getTemplate(id));
+  }));
 
-    // Verify state parameter
-    if (state !== req.session.docusignState) {
-      console.log('❌ State mismatch!');
-      console.log('   Received state:', state);
-      console.log('   Stored state:', req.session.docusignState);
-      return res.status(400).json({ error: 'Invalid state parameter' });
-    }
-
-    // Exchange code for access token
-    const tokenData = await req.docusignService.getAccessToken(code);
-
-    console.log('🔐 Callback - Token data received:', JSON.stringify(tokenData, null, 2));
-
-    if (!tokenData || !tokenData.access_token) {
-      console.error('❌ Callback - No access token in tokenData');
-      return res.status(400).json({ error: 'Failed to get access token from DocuSign' });
-    }
-
-    // Store authentication info in session
-    req.session.docusignAuthenticated = true;
-    req.session.docusignAccessToken = tokenData.access_token;
-    req.session.docusignAccountId = req.docusignService.getCurrentAccountId();
-
-    // Clear state
-    delete req.session.docusignState;
-
-    res.json({
-      success: true,
-      message: 'Successfully authenticated with DocuSign',
-      accountId: req.session.docusignAccountId
-    });
-  } catch (error) {
-    console.error('OAuth callback error:', error);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Check authentication status
-router.get('/status', getDocuSignService, (req, res) => {
-  try {
-    const isAuthenticated = req.docusignService.isAuthenticated() || req.session.docusignAuthenticated;
-
-    // Debug logging
-    console.log('🔐 Status Check - Session ID:', req.session.id);
-    console.log('🔐 Status Check - Session data:', JSON.stringify(req.session, null, 2));
-
-    res.json({
-      authenticated: isAuthenticated,
-      accountId: req.session.docusignAccountId || req.docusignService.getCurrentAccountId(),
-      sessionId: req.session.id,
-      sessionData: req.session
-    });
-  } catch (error) {
-    console.error('Status check error:', error);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Get templates from DocuSign
-router.get('/templates', getDocuSignService, async (req, res) => {
-  try {
-    const templates = await req.docusignService.getTemplates();
-    res.json(templates);
-  } catch (error) {
-    console.error('Error getting templates:', error);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Get template by ID
-router.get('/templates/:id', getDocuSignService, async (req, res) => {
-  try {
-    const template = await req.docusignService.getTemplate(req.params.id);
-    res.json(template);
-  } catch (error) {
-    console.error('Error getting template:', error);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Create new template
-router.post('/templates', getDocuSignService, async (req, res) => {
-  try {
-    const template = await req.docusignService.createTemplate(req.body);
-    res.json(template);
-  } catch (error) {
-    console.error('Error creating template:', error);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Update template
-router.put('/templates/:id', getDocuSignService, async (req, res) => {
-  try {
-    const template = await req.docusignService.updateTemplate(req.params.id, req.body);
-    res.json(template);
-  } catch (error) {
-    console.error('Error updating template:', error);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Delete template
-router.delete('/templates/:id', getDocuSignService, async (req, res) => {
-  try {
-    const result = await req.docusignService.deleteTemplate(req.params.id);
-    res.json(result);
-  } catch (error) {
-    console.error('Error deleting template:', error);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Get envelopes
-router.get('/envelopes', getDocuSignService, async (req, res) => {
-  try {
-    const { status, fromDate } = req.query;
-    const envelopes = await req.docusignService.listEnvelopes(status, fromDate);
-    res.json(envelopes);
-  } catch (error) {
-    console.error('Error listing envelopes:', error);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Get envelope by ID
-router.get('/envelopes/:id', getDocuSignService, async (req, res) => {
-  try {
-    const envelope = await req.docusignService.getEnvelopeStatus(req.params.id);
-    res.json(envelope);
-  } catch (error) {
-    console.error('Error getting envelope:', error);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Create envelope from template
-router.post('/envelopes', getDocuSignService, async (req, res) => {
-  try {
-    const { templateId, envelopeData } = req.body;
-    const envelope = await req.docusignService.createEnvelopeFromTemplate(templateId, envelopeData);
-    res.json(envelope);
-  } catch (error) {
-    console.error('Error creating envelope:', error);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Send envelope for embedded signing
-router.post('/envelopes/embedded-signing', getDocuSignService, async (req, res) => {
-  try {
-    const envelopeArgs = req.body;
-
-    // Validate required fields
-    if (!envelopeArgs.signerEmail || !envelopeArgs.signerName || !envelopeArgs.docFile) {
-      return res.status(400).json({
-        error: 'Missing required fields: signerEmail, signerName, docFile'
-      });
-    }
-
-    // Add return URL and ping URL if not provided
-    if (!envelopeArgs.dsReturnUrl) {
-      envelopeArgs.dsReturnUrl = `${req.protocol}://${req.get('host')}/docusign/callback`;
-    }
-    if (!envelopeArgs.dsPingUrl) {
-      envelopeArgs.dsPingUrl = `${req.protocol}://${req.get('host')}/docusign/ping`;
-    }
-
-    const result = await req.docusignService.sendEnvelopeForEmbeddedSigning(envelopeArgs);
-    res.json(result);
-  } catch (error) {
-    console.error('Error sending envelope for embedded signing:', error);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Get envelope details
-router.get('/envelopes/:id/details', getDocuSignService, async (req, res) => {
-  try {
-    const envelope = await req.docusignService.getEnvelopeDetails(req.params.id);
-    res.json(envelope);
-  } catch (error) {
-    console.error('Error getting envelope details:', error);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Update envelope status
-router.patch('/envelopes/:id/status', getDocuSignService, async (req, res) => {
-  try {
-    const { status } = req.body;
-    if (!status) {
-      return res.status(400).json({ error: 'Status is required' });
-    }
-
-    const result = await req.docusignService.updateEnvelopeStatus(req.params.id, status);
-    res.json(result);
-  } catch (error) {
-    console.error('Error updating envelope status:', error);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Get envelope documents
-router.get('/envelopes/:id/documents', getDocuSignService, async (req, res) => {
-  try {
-    const documents = await req.docusignService.getEnvelopeDocuments(req.params.id);
-    res.json(documents);
-  } catch (error) {
-    console.error('Error getting envelope documents:', error);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Create embedded signing URL
-router.post('/envelopes/:id/signing-url', getDocuSignService, async (req, res) => {
-  try {
-    const { recipientEmail, recipientName, returnUrl } = req.body;
-    const signingUrl = await req.docusignService.createEmbeddedSigningUrl(
-      req.params.id,
-      recipientEmail,
-      recipientName,
-      returnUrl
-    );
-    res.json({ signingUrl });
-  } catch (error) {
-    console.error('Error creating signing URL:', error);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Debug endpoint to check session
-router.get('/debug-session', (req, res) => {
-  try {
-    // Test setting a value in session
-    req.session.testValue = 'test-' + Date.now();
-
-    res.json({
-      sessionId: req.session.id,
-      sessionData: req.session,
-      cookies: req.headers.cookie,
-      userAgent: req.headers['user-agent'],
-      testValueSet: req.session.testValue
-    });
-  } catch (error) {
-    console.error('Debug session error:', error);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Test session persistence
-router.get('/test-session', (req, res) => {
-  try {
-    const testValue = req.session.testValue || 'NOT_SET';
-    res.json({
-      sessionId: req.session.id,
-      testValue: testValue,
-      sessionData: req.session
-    });
-  } catch (error) {
-    console.error('Test session error:', error);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Logout from DocuSign
-router.post('/logout', getDocuSignService, async (req, res) => {
-  try {
-    req.docusignService.clearToken();
-
-    // Clear session
-    req.session.docusignAuthenticated = false;
-    req.session.docusignAccessToken = null;
-    req.session.docusignAccountId = null;
-    req.session.docusignMethod = null;
-
-    res.json({ success: true, message: 'Successfully logged out from DocuSign' });
-  } catch (error) {
-    console.error('Error logging out:', error);
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Callback route for embedded signing completion
-router.get('/callback', (req, res) => {
-  try {
-    const { envelopeId, event, state } = req.query;
-
-    console.log('🔐 DocuSign Callback - Envelope:', envelopeId, 'Event:', event, 'State:', state);
-
-    // Store completion info in session for frontend to access
-    req.session.docusignCallback = {
-      envelopeId,
-      event,
-      state,
-      timestamp: new Date().toISOString()
+  router.post('/templates', withService(docusignRegistry, async (service, req, res) => {
+    requireObject(req.body);
+    const input = {
+      name: requiredString(req.body.name, 'name', { maxLength: 160 }),
+      description: optionalString(req.body.description, 'description', { maxLength: 1000 }) || '',
+      shared: Boolean(req.body.shared),
     };
+    res.status(201).json(await service.createTemplate(input));
+  }));
 
-    // Redirect to frontend with success message
-    res.redirect(`${process.env.FRONTEND_ORIGIN?.split(',')[0] || 'http://localhost:5173'}/docusign/signing-complete?envelopeId=${envelopeId}&event=${event}`);
-  } catch (error) {
-    console.error('Error in DocuSign callback:', error);
-    res.status(500).send('Error processing callback');
-  }
-});
+  router.put('/templates/:id', withService(docusignRegistry, async (service, req, res) => {
+    requireObject(req.body);
+    const id = requiredString(req.params.id, 'template id', { maxLength: 200 });
+    const input = {
+      name: requiredString(req.body.name, 'name', { maxLength: 160 }),
+      description: optionalString(req.body.description, 'description', { maxLength: 1000 }) || '',
+      shared: Boolean(req.body.shared),
+    };
+    res.json(await service.updateTemplate(id, input));
+  }));
 
-// Ping route for DocuSign to communicate with our app
-router.post('/ping', (req, res) => {
-  try {
-    const { envelopeId, event } = req.body;
+  router.delete('/templates/:id', withService(docusignRegistry, async (service, req, res) => {
+    const id = requiredString(req.params.id, 'template id', { maxLength: 200 });
+    res.json(await service.deleteTemplate(id));
+  }));
 
-    console.log('🔐 DocuSign Ping - Envelope:', envelopeId, 'Event:', event);
+  router.get('/envelopes', withService(docusignRegistry, async (service, req, res) => {
+    const status = optionalString(req.query.status, 'status', { maxLength: 40 }) || 'any';
+    const fromDate = optionalString(req.query.fromDate, 'fromDate', { maxLength: 40 });
+    res.json(await service.listEnvelopes(status, fromDate));
+  }));
 
-    // You can implement real-time updates here
-    // For example, emit to WebSocket clients or update database
+  router.get('/envelopes/:id', withService(docusignRegistry, async (service, req, res) => {
+    const id = requiredString(req.params.id, 'envelope id', { maxLength: 200 });
+    res.json(await service.getEnvelopeStatus(id));
+  }));
 
-    res.json({
-      success: true,
-      message: 'Ping received',
-      timestamp: new Date().toISOString()
-    });
-  } catch (error) {
-    console.error('Error in DocuSign ping:', error);
-    res.status(500).json({ error: error.message });
-  }
-});
+  router.post('/envelopes', withService(docusignRegistry, async (service, req, res) => {
+    requireObject(req.body);
+    const templateId = requiredString(req.body.templateId, 'templateId', { maxLength: 200 });
+    const envelopeData = requireObject(req.body.envelopeData, 'envelopeData');
+    res.status(201).json(await service.createEnvelopeFromTemplate(templateId, envelopeData));
+  }));
 
-// Get callback information
-router.get('/callback-info', (req, res) => {
-  try {
-    const callbackInfo = req.session.docusignCallback;
-    if (callbackInfo) {
-      res.json(callbackInfo);
-      // Clear the callback info after sending
-      delete req.session.docusignCallback;
-    } else {
-      res.json({ message: 'No callback information available' });
+  router.post(
+    '/envelopes/embedded-signing',
+    withService(docusignRegistry, async (service, req, res) => {
+      requireObject(req.body);
+      const envelopeArgs = {
+        signerEmail: requiredString(req.body.signerEmail, 'signerEmail', { maxLength: 254 }),
+        signerName: requiredString(req.body.signerName, 'signerName', { maxLength: 160 }),
+        signerClientId: String(req.employee._id),
+        docFile: requiredString(req.body.docFile, 'docFile', { maxLength: 8 * 1024 * 1024 }),
+        documentName: optionalString(req.body.documentName, 'documentName', { maxLength: 255 })
+          || 'document.pdf',
+        emailSubject: optionalString(req.body.emailSubject, 'emailSubject', { maxLength: 255 })
+          || 'Please sign this document',
+        anchorString: optionalString(req.body.anchorString, 'anchorString', { maxLength: 100 })
+          || '/sn1/',
+        dsReturnUrl: `${config.frontendUrl}/docusign/callback`,
+      };
+      res.status(201).json(await service.sendEnvelopeForEmbeddedSigning(envelopeArgs));
+    })
+  );
+
+  router.get(
+    '/envelopes/:id/details',
+    withService(docusignRegistry, async (service, req, res) => {
+      const id = requiredString(req.params.id, 'envelope id', { maxLength: 200 });
+      res.json(await service.getEnvelopeDetails(id));
+    })
+  );
+
+  router.patch(
+    '/envelopes/:id/status',
+    withService(docusignRegistry, async (service, req, res) => {
+      requireObject(req.body);
+      const id = requiredString(req.params.id, 'envelope id', { maxLength: 200 });
+      const status = requiredString(req.body.status, 'status', { maxLength: 40 });
+      if (!['created', 'sent', 'voided', 'deleted'].includes(status)) {
+        throw new AppError(400, 'VALIDATION_ERROR', 'Unsupported DocuSign envelope status');
+      }
+      res.json(await service.updateEnvelopeStatus(id, status));
+    })
+  );
+
+  router.get(
+    '/envelopes/:id/documents',
+    withService(docusignRegistry, async (service, req, res) => {
+      const id = requiredString(req.params.id, 'envelope id', { maxLength: 200 });
+      const document = await service.getEnvelopeDocuments(id);
+      res.type('application/pdf').send(document);
+    })
+  );
+
+  router.post(
+    '/envelopes/:id/signing-url',
+    withService(docusignRegistry, async (service, req, res) => {
+      requireObject(req.body);
+      const id = requiredString(req.params.id, 'envelope id', { maxLength: 200 });
+      const recipientEmail = requiredString(
+        req.body.recipientEmail,
+        'recipientEmail',
+        { maxLength: 254 }
+      );
+      const recipientName = requiredString(
+        req.body.recipientName,
+        'recipientName',
+        { maxLength: 160 }
+      );
+      const signingUrl = await service.createEmbeddedSigningUrl(
+        id,
+        recipientEmail,
+        recipientName,
+        `${config.frontendUrl}/docusign/callback`
+      );
+      res.json({ signingUrl });
+    })
+  );
+
+  router.post('/logout', (req, res) => {
+    docusignRegistry.clear(String(req.employee._id));
+    res.json({ success: true, message: 'Disconnected from DocuSign' });
+  });
+
+  return router;
+}
+
+function withService(registry, handler) {
+  return asyncHandler(async (req, res) => {
+    const service = serviceFor(registry, req.employee);
+    if (!service.isAuthenticated()) {
+      throw new AppError(503, 'DOCUSIGN_UNAVAILABLE', 'DocuSign is not connected');
     }
-  } catch (error) {
-    console.error('Error getting callback info:', error);
-    res.status(500).json({ error: error.message });
-  }
-});
+    try {
+      return await handler(service, req, res);
+    } catch (error) {
+      if (error instanceof AppError) throw error;
+      throw new AppError(502, 'DOCUSIGN_ERROR', 'DocuSign could not complete the operation');
+    }
+  });
+}
 
-module.exports = router;
+function serviceFor(registry, employee) {
+  return registry.getForEmployee(String(employee._id));
+}
+
+module.exports = { createDocuSignRouter };

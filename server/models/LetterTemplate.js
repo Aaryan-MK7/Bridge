@@ -10,11 +10,11 @@ const fieldSchema = new mongoose.Schema(
 );
 
 const letterTemplateSchema = new mongoose.Schema({
-  label: { type: String, required: true },
-  value: { type: String, required: true, unique: true },
-  url: { type: String, default: '' },
+  label: { type: String, required: true, trim: true },
+  value: { type: String, required: true, unique: true, trim: true },
+  url: { type: String, default: '', trim: true },
   fields: { type: [fieldSchema], default: [] },
   isActive: { type: Boolean, default: true },
-});
+}, { timestamps: true });
 
 module.exports = mongoose.model('LetterTemplate', letterTemplateSchema);

@@ -1,6 +1,10 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
-const { getRuntimeConfig, validateRuntimeConfig } = require('../config/runtime');
+const { createApp } = require('../app');
+const {
+  getRuntimeConfig,
+  validateRuntimeConfig,
+} = require('../config/runtime');
 
 test('uses safe development defaults', () => {
   const config = getRuntimeConfig({});
@@ -15,7 +19,8 @@ test('normalizes comma-separated frontend origins', () => {
     PORT: '4100',
     MONGO_URI: 'mongodb://db.example/bridge',
     FRONTEND_ORIGIN: 'https://portal.example, https://admin.example ',
-    SESSION_SECRET: 'production-secret',
+    FRONTEND_URL: 'https://portal.example',
+    JWT_SECRET: 'a-production-secret-with-at-least-32-characters',
     NODE_ENV: 'production',
   });
 
@@ -31,14 +36,18 @@ test('reports unsafe production defaults', () => {
   const config = getRuntimeConfig({ NODE_ENV: 'production' });
 
   assert.deepEqual(validateRuntimeConfig(config), [
-    'SESSION_SECRET must be set outside development.',
+    'JWT_SECRET must be set outside development.',
     'FRONTEND_ORIGIN should not point to localhost in production.',
   ]);
 });
 
 test('serves a degraded health response before the database connects', async () => {
-  process.env.NODE_ENV = 'test';
-  const { app } = require('../index');
+  const config = getRuntimeConfig({ NODE_ENV: 'test' });
+  const app = createApp({
+    config,
+    databaseState: () => false,
+    logger: { error() {} },
+  });
   const server = app.listen(0);
 
   try {

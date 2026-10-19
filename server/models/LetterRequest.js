@@ -16,7 +16,7 @@ const letterRequestSchema = new mongoose.Schema({
   // Dynamic per-letter-type inputs
   details: {
     type: mongoose.Schema.Types.Mixed,
-    default: {}
+    default: () => ({})
   },
   status: {
     type: String,
@@ -76,6 +76,9 @@ const letterRequestSchema = new mongoose.Schema({
     type: Date,
     default: null
   }
-});
+}, { timestamps: true });
+
+letterRequestSchema.index({ employeeId: 1, requestDate: -1 });
+letterRequestSchema.index({ status: 1, requestDate: -1 });
 
 module.exports = mongoose.model('LetterRequest', letterRequestSchema);

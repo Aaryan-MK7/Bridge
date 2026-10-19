@@ -9,6 +9,18 @@ class EmailService {
     this.userId = process.env.EMAILJS_USER_ID || this.publicKey; // User ID is often the same as public key
   }
 
+  async sendPasswordResetEmail(employee, resetUrl) {
+    return this.sendEmail({
+      to_email: employee.email,
+      to_name: employee.name,
+      from_name: 'Bridge HR',
+      subject: 'Reset your Bridge password',
+      employee_name: employee.name,
+      reset_url: resetUrl,
+      message: `Use this one-time link to reset your Bridge password: ${resetUrl}`,
+    });
+  }
+
   // Send email using EmailJS REST API
   async sendEmail(templateParams) {
     try {

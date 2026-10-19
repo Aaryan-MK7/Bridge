@@ -30,8 +30,8 @@ class DocuSignService {
     this.scopes = 'signature'; // Required for eSignature REST API endpoints
     this.jwtLifeSec = dsConfig.jwtLifeSec;
 
-    // Debug mode
-    this._debug = true;
+    // Integration diagnostics are deliberately disabled because OAuth data is sensitive.
+    this._debug = false;
     this._debug_prefix = 'DocuSignService';
   }
 
@@ -66,7 +66,7 @@ class DocuSignService {
   // Exchange authorization code for access token (OAuth fallback)
   async getAccessToken(authCode) {
     try {
-      this._debug_log('Getting access token for code: ' + authCode);
+      this._debug_log('Exchanging OAuth authorization code');
 
       const tokenResponse = await axios.post(`${dsConfig.dsOauthServer}/oauth/token`, qs.stringify({
         grant_type: 'authorization_code',
@@ -240,7 +240,7 @@ class DocuSignService {
   }
 
   // Get current access token
-  getAccessToken() {
+  getCurrentAccessToken() {
     return this.accessToken;
   }
 
