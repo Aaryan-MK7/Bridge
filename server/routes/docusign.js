@@ -2,7 +2,6 @@ const express = require('express');
 const { AppError, asyncHandler } = require('../middleware/errors');
 const {
   optionalString,
-  requireObject,
   requiredString,
 } = require('../utils/validation');
 
@@ -92,31 +91,6 @@ function createDocuSignRouter({ auth, docusignRegistry, config }) {
     res.json(await service.getTemplate(id));
   }));
 
-  router.post('/templates', withService(docusignRegistry, async (service, req, res) => {
-    requireObject(req.body);
-    const input = {
-      name: requiredString(req.body.name, 'name', { maxLength: 160 }),
-      description: optionalString(req.body.description, 'description', { maxLength: 1000 }) || '',
-      shared: Boolean(req.body.shared),
-    };
-    res.status(201).json(await service.createTemplate(input));
-  }));
-
-  router.put('/templates/:id', withService(docusignRegistry, async (service, req, res) => {
-    requireObject(req.body);
-    const id = requiredString(req.params.id, 'template id', { maxLength: 200 });
-    const input = {
-      name: requiredString(req.body.name, 'name', { maxLength: 160 }),
-      description: optionalString(req.body.description, 'description', { maxLength: 1000 }) || '',
-      shared: Boolean(req.body.shared),
-    };
-    res.json(await service.updateTemplate(id, input));
-  }));
-
-  router.delete('/templates/:id', withService(docusignRegistry, async (service, req, res) => {
-    const id = requiredString(req.params.id, 'template id', { maxLength: 200 });
-    res.json(await service.deleteTemplate(id));
-  }));
 
   router.get('/envelopes', withService(docusignRegistry, async (service, req, res) => {
     const status = optionalString(req.query.status, 'status', { maxLength: 40 }) || 'any';
@@ -129,33 +103,6 @@ function createDocuSignRouter({ auth, docusignRegistry, config }) {
     res.json(await service.getEnvelopeStatus(id));
   }));
 
-  router.post('/envelopes', withService(docusignRegistry, async (service, req, res) => {
-    requireObject(req.body);
-    const templateId = requiredString(req.body.templateId, 'templateId', { maxLength: 200 });
-    const envelopeData = requireObject(req.body.envelopeData, 'envelopeData');
-    res.status(201).json(await service.createEnvelopeFromTemplate(templateId, envelopeData));
-  }));
-
-  router.post(
-    '/envelopes/embedded-signing',
-    withService(docusignRegistry, async (service, req, res) => {
-      requireObject(req.body);
-      const envelopeArgs = {
-        signerEmail: requiredString(req.body.signerEmail, 'signerEmail', { maxLength: 254 }),
-        signerName: requiredString(req.body.signerName, 'signerName', { maxLength: 160 }),
-        signerClientId: String(req.employee._id),
-        docFile: requiredString(req.body.docFile, 'docFile', { maxLength: 8 * 1024 * 1024 }),
-        documentName: optionalString(req.body.documentName, 'documentName', { maxLength: 255 })
-          || 'document.pdf',
-        emailSubject: optionalString(req.body.emailSubject, 'emailSubject', { maxLength: 255 })
-          || 'Please sign this document',
-        anchorString: optionalString(req.body.anchorString, 'anchorString', { maxLength: 100 })
-          || '/sn1/',
-        dsReturnUrl: `${config.frontendUrl}/admin/integrations`,
-      };
-      res.status(201).json(await service.sendEnvelopeForEmbeddedSigning(envelopeArgs));
-    })
-  );
 
   router.get(
     '/envelopes/:id/details',
@@ -165,18 +112,6 @@ function createDocuSignRouter({ auth, docusignRegistry, config }) {
     })
   );
 
-  router.patch(
-    '/envelopes/:id/status',
-    withService(docusignRegistry, async (service, req, res) => {
-      requireObject(req.body);
-      const id = requiredString(req.params.id, 'envelope id', { maxLength: 200 });
-      const status = requiredString(req.body.status, 'status', { maxLength: 40 });
-      if (!['created', 'sent', 'voided', 'deleted'].includes(status)) {
-        throw new AppError(400, 'VALIDATION_ERROR', 'Unsupported DocuSign envelope status');
-      }
-      res.json(await service.updateEnvelopeStatus(id, status));
-    })
-  );
 
   router.get(
     '/envelopes/:id/documents',
@@ -187,30 +122,6 @@ function createDocuSignRouter({ auth, docusignRegistry, config }) {
     })
   );
 
-  router.post(
-    '/envelopes/:id/signing-url',
-    withService(docusignRegistry, async (service, req, res) => {
-      requireObject(req.body);
-      const id = requiredString(req.params.id, 'envelope id', { maxLength: 200 });
-      const recipientEmail = requiredString(
-        req.body.recipientEmail,
-        'recipientEmail',
-        { maxLength: 254 }
-      );
-      const recipientName = requiredString(
-        req.body.recipientName,
-        'recipientName',
-        { maxLength: 160 }
-      );
-      const signingUrl = await service.createEmbeddedSigningUrl(
-        id,
-        recipientEmail,
-        recipientName,
-        `${config.frontendUrl}/admin/integrations`
-      );
-      res.json({ signingUrl });
-    })
-  );
 
   router.post('/logout', (req, res) => {
     docusignRegistry.clear(String(req.employee._id));

@@ -78,5 +78,5 @@ export function formatLetterType(value) {
 }
 
 export function isRequestOpen(status) {
-  return ['pending', 'letter_generated'].includes(String(status || '').toLowerCase());
+  return String(status || '').toLowerCase() === 'pending';
 }

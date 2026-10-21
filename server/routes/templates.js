@@ -14,7 +14,8 @@ function createTemplatesRouter({ LetterTemplate, auth }) {
   router.use(auth.requireAuth);
 
   router.get('/', asyncHandler(async (req, res) => {
-    const templates = await LetterTemplate.find({}).sort({ label: 1 });
+    const filter = req.employee.role === 'admin' ? {} : { isActive: true };
+    const templates = await LetterTemplate.find(filter).sort({ label: 1 });
     res.json(templates);
   }));
 

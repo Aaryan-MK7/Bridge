@@ -12,6 +12,7 @@ function createTokenService({ secret, expiresIn }) {
       return jwt.sign(
         {
           employeeId: employee.employeeId,
+          authVersion: employee.authVersion || 0,
         },
         secret,
         {

@@ -59,8 +59,15 @@ class DocuSignService {
   // Get OAuth authorization URL (fallback method)
   getAuthUrl() {
     const state = require('crypto').randomBytes(32).toString('hex');
-    const authUrl = `${dsConfig.dsOauthServer}/oauth/auth?response_type=code&scope=${this.scopes}&client_id=${dsConfig.dsClientId}&redirect_uri=${process.env.DOCUSIGN_REDIRECT_URI}&state=${state}`;
-    return { authUrl, state };
+    const authUrl = new URL('/oauth/auth', dsConfig.dsOauthServer);
+    authUrl.search = new URLSearchParams({
+      response_type: 'code',
+      scope: this.scopes,
+      client_id: dsConfig.dsClientId || '',
+      redirect_uri: process.env.DOCUSIGN_REDIRECT_URI || '',
+      state,
+    }).toString();
+    return { authUrl: authUrl.toString(), state };
   }
 
   // Exchange authorization code for access token (OAuth fallback)
@@ -299,12 +306,15 @@ class DocuSignService {
   // Generate consent URL for JWT authentication
   getConsentUrl() {
     const consentScopes = this.scopes + ' impersonation';
-    const consentUrl = `${dsConfig.dsOauthServer}/oauth/auth?response_type=code&` +
-      `scope=${encodeURIComponent(consentScopes)}&client_id=${dsConfig.dsClientId}&` +
-      `redirect_uri=${encodeURIComponent(process.env.DOCUSIGN_REDIRECT_URI)}`;
-
-    this._debug_log('Generated consent URL: ' + consentUrl);
-    return consentUrl;
+    const consentUrl = new URL('/oauth/auth', dsConfig.dsOauthServer);
+    consentUrl.search = new URLSearchParams({
+      response_type: 'code',
+      scope: consentScopes,
+      client_id: dsConfig.dsClientId || '',
+      redirect_uri: process.env.DOCUSIGN_REDIRECT_URI || '',
+    }).toString();
+    this._debug_log('Generated consent URL: ' + consentUrl.toString());
+    return consentUrl.toString();
   }
 
   // Check if consent is required from error response
@@ -636,7 +646,13 @@ class DocuSignService {
   }
 
   // Create embedded signing URL
-  async createEmbeddedSigningUrl(envelopeId, recipientEmail, recipientName, returnUrl) {
+  async createEmbeddedSigningUrl(
+    envelopeId,
+    recipientEmail,
+    recipientName,
+    returnUrl,
+    recipientClientId = '1000'
+  ) {
     try {
       if (!this.accountId) {
         await this.getUserInfo();
@@ -648,7 +664,7 @@ class DocuSignService {
         authenticationMethod: 'none',
         email: recipientEmail,
         userName: recipientName,
-        clientUserId: '1000', // Required for embedded signing
+        clientUserId: recipientClientId,
         pingFrequency: '600',
         pingUrl: returnUrl
       };
@@ -726,23 +742,23 @@ class DocuSignService {
     // create the envelope definition
     let env = new docusign.EnvelopeDefinition();
     env.emailSubject = args.emailSubject || 'Please sign this document';
+    if (args.transactionId) env.transactionId = args.transactionId;
 
     // add the documents
     if (args.docFile) {
       let doc1 = new docusign.Document();
       // Convert base64 to buffer if needed
-      let docPdfBytes;
+      let documentBytes;
       if (typeof args.docFile === 'string') {
-        // If it's already base64, decode it to buffer first
-        docPdfBytes = Buffer.from(args.docFile, 'base64');
+        documentBytes = Buffer.from(args.docFile, 'base64');
       } else {
-        docPdfBytes = args.docFile;
+        documentBytes = args.docFile;
       }
 
-      let doc1b64 = Buffer.from(docPdfBytes).toString('base64');
+      let doc1b64 = Buffer.from(documentBytes).toString('base64');
       doc1.documentBase64 = doc1b64;
-      doc1.name = args.documentName || 'Document'; // can be different from actual file name
-      doc1.fileExtension = 'pdf';
+      doc1.name = args.documentName || 'Document.docx';
+      doc1.fileExtension = documentExtension(doc1.name);
       doc1.documentId = '1';
 
       // The order in the docs array determines the order in the envelope
@@ -759,17 +775,22 @@ class DocuSignService {
       recipientId: 1,
     });
 
-    // Create signHere fields (also known as tabs) on the documents,
-    // We're using anchor (autoPlace) positioning
-    //
-    // The DocuSign platform searches throughout your envelope's
-    // documents for matching anchor strings.
-    let signHere1 = docusign.SignHere.constructFromObject({
-      anchorString: args.anchorString || '/sn1/',
-      anchorYOffset: '10',
-      anchorUnits: 'pixels',
-      anchorXOffset: '20',
-    });
+    // Use an explicit anchor when supplied; otherwise place a reliable
+    // first-page signature tab for generated documents.
+    const signHere = args.anchorString
+      ? {
+        anchorString: args.anchorString,
+        anchorYOffset: '10',
+        anchorUnits: 'pixels',
+        anchorXOffset: '20',
+      }
+      : {
+        documentId: '1',
+        pageNumber: '1',
+        xPosition: '400',
+        yPosition: '650',
+      };
+    let signHere1 = docusign.SignHere.constructFromObject(signHere);
 
     // Tabs are set per recipient / signer
     let signer1Tabs = docusign.Tabs.constructFromObject({
@@ -804,14 +825,8 @@ class DocuSignService {
 
     let viewRequest = new docusign.RecipientViewRequest();
 
-    // Set the url where you want the recipient to go once they are done signing
-    // should typically be a callback route somewhere in your app.
-    // The query parameter is included as an example of how
-    // to save/recover state information during the redirect to
-    // the DocuSign signing. It's usually better to use
-    // the session mechanism of your web framework. Query parameters
-    // can be changed/spoofed very easily.
-    viewRequest.returnUrl = args.dsReturnUrl + '?state=123';
+    // Return to the authenticated administrative workflow after signing.
+    viewRequest.returnUrl = args.dsReturnUrl;
 
     // How has your app authenticated the user? In addition to your app's
     // authentication, you can include authenticate steps from DocuSign.
@@ -971,6 +986,14 @@ class DocuSignService {
       throw error;
     }
   }
+}
+
+function documentExtension(documentName) {
+  const match = /\.([A-Za-z0-9]+)$/.exec(String(documentName || ''));
+  const extension = match?.[1]?.toLowerCase();
+  return extension && ['doc', 'docx', 'pdf', 'rtf', 'txt'].includes(extension)
+    ? extension
+    : 'pdf';
 }
 
 module.exports = DocuSignService;

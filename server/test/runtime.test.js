@@ -1,6 +1,7 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
 const { createApp } = require('../app');
+const { startServer } = require('../index');
 const {
   getRuntimeConfig,
   validateRuntimeConfig,
@@ -64,4 +65,23 @@ test('serves a degraded health response before the database connects', async () 
   } finally {
     await new Promise((resolve) => server.close(resolve));
   }
+});
+
+test('disconnects the database when HTTP startup fails', async () => {
+  let disconnected = false;
+  await assert.rejects(
+    startServer({
+      config: getRuntimeConfig({ NODE_ENV: 'test' }),
+      connectDatabase: async () => {},
+      disconnectDatabase: async () => { disconnected = true; },
+      createApp: () => ({}),
+      listen: async () => {
+        const error = new Error('Address in use');
+        error.code = 'EADDRINUSE';
+        throw error;
+      },
+    }),
+    { code: 'EADDRINUSE' }
+  );
+  assert.equal(disconnected, true);
 });

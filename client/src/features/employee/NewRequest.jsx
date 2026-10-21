@@ -62,7 +62,7 @@ export default function NewRequest() {
   const submitRequest = async () => {
     setStatus({ loading: true, error: '' });
     try {
-      await letterRequestApi.create({
+      const result = await letterRequestApi.create({
         letterType: form.letterType,
         details: form.details,
         address: form.address.trim(),
@@ -70,7 +70,7 @@ export default function NewRequest() {
       });
       navigate('/employee/history', {
         replace: true,
-        state: { notice: 'Your letter request was submitted.' },
+        state: { notice: result.warning || 'Your letter request was submitted.' },
       });
     } catch (error) {
       setStatus({ loading: false, error: error.message });

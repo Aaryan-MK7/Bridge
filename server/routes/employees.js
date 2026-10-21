@@ -4,6 +4,7 @@ const Papa = require('papaparse');
 const bcrypt = require('bcryptjs');
 const crypto = require('crypto');
 const path = require('path');
+const { rateLimit } = require('express-rate-limit');
 const { safeEmployeeDto } = require('../domain/employees');
 const { AppError, asyncHandler } = require('../middleware/errors');
 const {
@@ -26,8 +27,10 @@ function createEmployeesRouter({
 }) {
   const router = express.Router();
   const upload = createCsvUpload();
+  const loginLimit = createPublicRateLimit(10, 'Too many sign-in attempts. Try again later.');
+  const recoveryLimit = createPublicRateLimit(5, 'Too many recovery attempts. Try again later.');
 
-  router.post('/login', asyncHandler(async (req, res) => {
+  router.post('/login', loginLimit, asyncHandler(async (req, res) => {
     requireObject(req.body);
     const employeeId = requiredString(req.body.employeeId, 'employeeId', { maxLength: 80 });
     const password = requiredString(req.body.password, 'password', { maxLength: 128 });
@@ -44,7 +47,7 @@ function createEmployeesRouter({
     });
   }));
 
-  router.post('/forgot-password', asyncHandler(async (req, res) => {
+  router.post('/forgot-password', recoveryLimit, asyncHandler(async (req, res) => {
     requireObject(req.body);
     const employeeId = requiredString(req.body.employeeId, 'employeeId', { maxLength: 80 });
     const email = validateEmail(req.body.email, 'email', { required: true });
@@ -68,7 +71,7 @@ function createEmployeesRouter({
     });
   }));
 
-  router.post('/reset-password', asyncHandler(async (req, res) => {
+  router.post('/reset-password', recoveryLimit, asyncHandler(async (req, res) => {
     requireObject(req.body);
     const employeeId = requiredString(req.body.employeeId, 'employeeId', { maxLength: 80 });
     const resetToken = requiredString(req.body.resetToken, 'resetToken', { maxLength: 128 });
@@ -84,6 +87,7 @@ function createEmployeesRouter({
     }
 
     employee.passwordHash = await bcrypt.hash(newPassword, 12);
+    employee.authVersion = (employee.authVersion || 0) + 1;
     employee.resetToken = undefined;
     employee.resetTokenExpiry = undefined;
     await employee.save();
@@ -250,10 +254,11 @@ function createEmployeesRouter({
         throw new AppError(404, 'EMPLOYEE_NOT_FOUND', 'Employee not found');
       }
       if (!employee.passwordHash || !(await bcrypt.compare(oldPassword, employee.passwordHash))) {
-        throw new AppError(401, 'INVALID_CREDENTIALS', 'The current password is incorrect');
+        throw new AppError(403, 'INVALID_CREDENTIALS', 'The current password is incorrect');
       }
 
       employee.passwordHash = await bcrypt.hash(newPassword, 12);
+      employee.authVersion = (employee.authVersion || 0) + 1;
       employee.resetToken = undefined;
       employee.resetTokenExpiry = undefined;
       await employee.save();
@@ -262,6 +267,21 @@ function createEmployeesRouter({
   );
 
   return router;
+}
+
+function createPublicRateLimit(limit, message) {
+  return rateLimit({
+    windowMs: 15 * 60 * 1000,
+    limit,
+    standardHeaders: 'draft-8',
+    legacyHeaders: false,
+    message: {
+      error: {
+        code: 'RATE_LIMITED',
+        message,
+      },
+    },
+  });
 }
 
 function createCsvUpload() {

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
-import { authApi } from '../api/resources.js';
+import { authApi, employeeApi } from '../api/resources.js';
 import {
   clearStoredSession,
   loadStoredSession,
@@ -42,6 +42,15 @@ export function AuthProvider({ children }) {
       return nextSession;
     });
   }, []);
+
+  useEffect(() => {
+    if (!session?.token || !session.employee?.employeeId) return;
+    employeeApi.getProfile(session.employee.employeeId)
+      .then(updateEmployee)
+      .catch(() => {
+        // Authenticated 401 responses are handled by the shared API client.
+      });
+  }, [session?.employee?.employeeId, session?.token, updateEmployee]);
 
   const value = useMemo(() => ({
     employee: session?.employee || null,

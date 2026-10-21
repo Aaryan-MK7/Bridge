@@ -4,6 +4,7 @@ const REQUEST_STATUSES = Object.freeze([
   'rejected',
   'withdrawn',
   'letter_generated',
+  'signing_in_progress',
   'sent_for_signing',
   'signed',
   'completed',
@@ -11,10 +12,11 @@ const REQUEST_STATUSES = Object.freeze([
 
 const ALLOWED_TRANSITIONS = Object.freeze({
   pending: new Set(['approved', 'rejected', 'withdrawn']),
-  approved: new Set(['letter_generated', 'sent_for_signing', 'completed']),
+  approved: new Set(['letter_generated', 'signing_in_progress', 'sent_for_signing', 'completed']),
   rejected: new Set(['pending']),
   withdrawn: new Set(['pending']),
-  letter_generated: new Set(['sent_for_signing', 'completed']),
+  letter_generated: new Set(['signing_in_progress', 'sent_for_signing', 'completed']),
+  signing_in_progress: new Set(['approved', 'letter_generated', 'sent_for_signing']),
   sent_for_signing: new Set(['signed', 'completed']),
   signed: new Set(['completed']),
   completed: new Set(),

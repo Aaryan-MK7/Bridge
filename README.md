@@ -9,7 +9,7 @@ Employees can:
 - Sign in with an employee ID and password.
 - Submit a request from a built-in or administrator-defined letter type.
 - Supply dynamic request fields, a letter address, and additional context.
-- Track status history, download generated letters, and withdraw open requests.
+- Track status history, download approved letters, withdraw pending requests, and resubmit rejected or withdrawn requests.
 - Maintain their contact details and change their password.
 - Request a one-time password reset link when email delivery is configured.
 
@@ -18,7 +18,7 @@ Administrators can:
 - Review the organization-wide request queue and record approval or rejection notes.
 - Download generated documents and send approved requests to DocuSign.
 - Create employees with a temporary password, import employee records from CSV, and manage roles.
-- Define active letter types and dynamic text, number, date, or email fields.
+- Define the active letter types and dynamic text, number, date, or email fields accepted by the API.
 - Configure the operations notification address and inspect EmailJS readiness.
 - Connect and inspect the optional DocuSign integration.
 
@@ -43,7 +43,7 @@ flowchart LR
   D --> C
 ```
 
-Employees own their requests and can withdraw only while the transition is valid. Administrators control decisions and signing operations. The API rejects unsupported or out-of-order transitions with `409 INVALID_STATUS_TRANSITION`.
+Employees own their requests, can withdraw only pending work, and can resubmit rejected or withdrawn work. Administrators control decisions and signing operations. Status-changing writes use conditional database updates so concurrent actions cannot silently overwrite one another. The API rejects unsupported or out-of-order transitions with `409 INVALID_STATUS_TRANSITION`.
 
 ## Architecture
 
@@ -75,7 +75,7 @@ Bridge/
 │   ├── app.js                 Injectable application composition
 │   ├── database.js            Connection and default-template seeding
 │   └── index.js               Process startup and graceful shutdown
-├── public/templates/          Optional organization-owned DOCX/PDF templates
+├── public/templates/          Optional organization-owned DOCX templates
 └── package.json               Root workspace commands
 ```
 
@@ -83,7 +83,7 @@ Bridge/
 
 `client/src/api/client.js` owns the base URL, bearer header, response parsing, file downloads, and unauthorized-session handling. Feature screens call the resource methods in `client/src/api/resources.js` rather than building URLs directly.
 
-`AuthProvider` restores the browser session, supplies the in-memory bearer token, and clears the session on authenticated `401` responses. React Router guards separate guest, employee, and administrator routes. The client guards improve navigation, while the API remains the authorization authority.
+`AuthProvider` restores the browser session, revalidates the current employee and role, supplies the in-memory bearer token, and clears the session on authenticated `401` responses. React Router guards separate guest, employee, and administrator routes. The client guards improve navigation, while the API remains the authorization authority.
 
 ### Server boundaries
 
@@ -104,7 +104,7 @@ Roles are:
 
 ### LetterTemplate
 
-Defines the user-facing label, stable value, optional reference URL, active flag, and dynamic fields. Field types are `text`, `number`, `date`, and `email`; each field retains its `required` setting.
+Defines the user-facing label, stable value, optional reference URL, active flag, and dynamic fields. Field types are `text`, `number`, `date`, and `email`; each field retains its `required` setting. Only active database templates can be submitted, and the API rejects missing, undeclared, or incorrectly typed dynamic fields.
 
 ### LetterRequest
 
@@ -120,17 +120,19 @@ Stores small operational settings. The current `notifications` record contains o
 - Authenticated requests use `Authorization: Bearer <token>`; cookies and credentialed CORS are not used.
 - Every authenticated request verifies the token and reloads the employee, so deleted accounts and role changes take effect immediately.
 - Passwords are hashed with bcrypt at cost 12.
+- Public login and password-recovery endpoints are throttled per client address.
+- Helmet applies defensive HTTP response headers.
 - Password-reset tokens are random, stored only as SHA-256 hashes, expire after one hour, and are never returned by the API.
-- Employee, request, template, settings, PDF, and DocuSign resources are protected.
+- Employee, request, template, settings, and DocuSign resources are protected.
 - Self-or-admin middleware prevents employees from reading another employee's profile or request history.
-- Request ownership is checked for document access, withdrawal, and resubmission.
+- Request ownership is checked for document access, withdrawal, and resubmission; employees cannot download or preview a document until approval.
 - Administrator-only middleware protects organization-wide lists, decisions, employee management, settings, and integrations.
 - CORS accepts only configured frontend origins.
 - Input utilities bound string lengths, reject nested request-detail objects, validate emails and object IDs, and constrain uploads.
 - CSV imports are memory-only, limited to 2 MiB and 5,000 rows, and accept CSV MIME types plus a `.csv` extension.
 - API errors use a stable `{ "error": { "code", "message", "details?" } }` envelope.
 
-The web client currently persists the JWT in `localStorage`. Production deployments should use a restrictive Content Security Policy, avoid untrusted scripts, and treat any XSS as credential exposure. There is no refresh-token or explicit token-revocation store; use an appropriate `JWT_EXPIRES_IN` and rotate `JWT_SECRET` as part of incident response.
+The web client currently persists the JWT in `localStorage`. Production deployments should use a restrictive Content Security Policy, avoid untrusted scripts, and treat any XSS as credential exposure. Password changes and resets revoke existing tokens through an account authentication version; otherwise tokens remain valid until `JWT_EXPIRES_IN`. The default rate-limit store is process-local, so multi-replica deployments require a shared store to enforce global limits.
 
 ## API overview
 
@@ -149,12 +151,11 @@ Authenticated employee resources:
 - `/api/employees` — profiles, password changes, and administrator-managed directory operations.
 - `/api/letter-requests` — create, list, decide, withdraw, resubmit, download, preview, and sign requests.
 - `/api/templates` — active request definitions; mutations require an administrator.
-- `/api/pdf-filler/fill-template` — authenticated PDF generation from a supported local template.
 
 Administrator resources:
 
 - `/api/settings/notifications`
-- `/api/docusign/auth`, `/status`, `/templates`, `/envelopes`, and `/logout`
+- `/api/docusign/auth`, `/status`, read-only `/templates` and `/envelopes`, and `/logout`
 
 See the route modules in `server/routes/` for exact payloads and provider-specific operations.
 
@@ -231,7 +232,7 @@ Then run:
 npm run bootstrap:admin --workspace=server
 ```
 
-The command performs an idempotent upsert and hashes the supplied password. Remove `ADMIN_PASSWORD` from the environment after bootstrap. Running the command again intentionally updates the named administrator's profile and password.
+The command creates or updates the named administrator and hashes the supplied password. Remove `ADMIN_PASSWORD` from the environment after bootstrap. Running the command again intentionally updates that administrator's profile and password and revokes older sessions.
 
 ### Start development
 
@@ -278,8 +279,6 @@ For organization-branded documents, place templates in `public/templates/`. Know
 
 If a DOCX template is absent or cannot be rendered, Bridge creates a valid generic DOCX instead. A request is still saved if document generation itself fails; the create response includes a warning so the workflow does not lose submitted data.
 
-The legacy PDF filler requires matching files under `public/templates/` and returns `404` when a requested PDF template is unavailable.
-
 ## Email notifications
 
 Email is sent from the server through the EmailJS REST API. The database setting controls the operations recipient, while service credentials remain in environment variables.
@@ -295,7 +294,7 @@ The administrator settings screen reports whether the service ID, template ID, a
 
 ## DocuSign
 
-DocuSign supports JWT authentication with OAuth fallback and one-time state validation. The administrator integrations screen owns connection status. Approved or generated requests can be sent as embedded-signing envelopes and later refreshed to update completion state.
+DocuSign supports JWT authentication with OAuth fallback and one-time state validation. The administrator integrations screen owns connection status. Approved or generated requests can be sent as embedded-signing envelopes. Sent requests expose controls to resume embedded signing and refresh the provider status; completed envelopes update the Bridge request.
 
 Important operational constraints:
 
@@ -338,9 +337,11 @@ The smoke harness:
 - Runs the real administrator bootstrap command.
 - Verifies JWT login, protected routes, manual employee creation, and employee login.
 - Verifies self access and cross-employee denial.
-- Creates and lists requests against MongoDB, including address persistence.
-- Verifies administrator listing and approval.
-- Verifies owner-only withdrawal.
+- Verifies active-template enforcement and rejection of undeclared request fields.
+- Creates and lists requests against MongoDB, including address persistence and pending-document denial.
+- Verifies administrator document access, approval, and post-approval employee download.
+- Verifies owner-only withdrawal and rejected/withdrawn resubmission rules.
+- Verifies current-password checking and revocation of an older JWT after a password change.
 - Stops MongoDB and removes its temporary data.
 
 Set `MONGOD_BINARY` when the executable is not available as `mongod`.
@@ -364,6 +365,7 @@ Startup fails before listening when the runtime configuration is invalid or Mong
 6. Keep environment secrets and DocuSign private keys in a secret manager.
 7. Route liveness/readiness checks to `/health`.
 8. Terminate TLS before the client and API and add security headers, especially a restrictive Content Security Policy.
+9. Replace the in-memory login/recovery rate-limit store with a shared store before running multiple API replicas.
 
 ## Troubleshooting
 

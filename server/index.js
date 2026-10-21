@@ -11,13 +11,22 @@ const {
 
 async function startServer(options = {}) {
   const config = assertRuntimeConfig(options.config || getRuntimeConfig());
-  await (options.connectDatabase || connectDatabase)({ mongoUri: config.mongoUri });
-  const app = (options.createApp || createApp)({ config });
-  const server = await listen(app, config.port);
+  const connect = options.connectDatabase || connectDatabase;
+  const disconnect = options.disconnectDatabase || disconnectDatabase;
+  await connect({ mongoUri: config.mongoUri });
+  let app;
+  let server;
+  try {
+    app = (options.createApp || createApp)({ config });
+    server = await (options.listen || listen)(app, config.port);
+  } catch (error) {
+    await disconnect();
+    throw error;
+  }
 
   const shutdown = async () => {
     await new Promise((resolve) => server.close(resolve));
-    await (options.disconnectDatabase || disconnectDatabase)();
+    await disconnect();
   };
   process.once('SIGINT', shutdown);
   process.once('SIGTERM', shutdown);

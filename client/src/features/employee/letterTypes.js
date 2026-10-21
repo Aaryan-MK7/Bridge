@@ -53,16 +53,15 @@ export const fallbackLetterTypes = [
 ];
 
 export function mergeLetterTypes(templates = []) {
-  const merged = new Map(fallbackLetterTypes.map((type) => [type.value, type]));
-  templates
+  const fallbacks = new Map(fallbackLetterTypes.map((type) => [type.value, type]));
+  return templates
     .filter((template) => template.isActive !== false)
-    .forEach((template) => {
-      const fallback = merged.get(template.value);
-      merged.set(template.value, {
+    .map((template) => {
+      const fallback = fallbacks.get(template.value);
+      return {
         ...fallback,
         ...template,
         fields: template.fields?.length ? template.fields : fallback?.fields || [],
-      });
+      };
     });
-  return [...merged.values()];
 }

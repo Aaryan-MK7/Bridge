@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 
 import { employeeApi } from '../../api/resources.js';
 import { useAuth } from '../../auth/useAuth.js';
@@ -6,7 +7,8 @@ import { Alert, Button, Card, Field, LoadingState, PageHeader } from '../../comp
 import { formatDate } from '../../lib/format.js';
 
 export default function EmployeeProfile() {
-  const { employee, updateEmployee } = useAuth();
+  const { employee, logout, updateEmployee } = useAuth();
+  const navigate = useNavigate();
   const [profile, setProfile] = useState(employee);
   const [loading, setLoading] = useState(true);
   const [profileStatus, setProfileStatus] = useState({ saving: false, error: '', success: '' });
@@ -60,8 +62,11 @@ export default function EmployeeProfile() {
         oldPassword: passwords.oldPassword,
         newPassword: passwords.newPassword,
       });
-      setPasswords({ oldPassword: '', newPassword: '', confirmation: '' });
-      setPasswordStatus({ saving: false, error: '', success: 'Password updated.' });
+      logout();
+      navigate('/login', {
+        replace: true,
+        state: { notice: 'Password updated. Sign in again with your new password.' },
+      });
     } catch (error) {
       setPasswordStatus({ saving: false, error: error.message, success: '' });
     }

@@ -19,6 +19,9 @@ function createAuthMiddleware({ Employee, tokenService }) {
     if (!employee) {
       throw new AppError(401, 'INVALID_TOKEN', 'The authentication token is no longer valid');
     }
+    if (Number(claims.authVersion || 0) !== Number(employee.authVersion || 0)) {
+      throw new AppError(401, 'INVALID_TOKEN', 'The authentication token is no longer valid');
+    }
 
     req.auth = { claims, token: match[1] };
     req.employee = employee;

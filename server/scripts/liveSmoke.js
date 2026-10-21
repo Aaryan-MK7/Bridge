@@ -90,27 +90,76 @@ async function run() {
       token: otherEmployee.token,
     }, 403);
 
+    const inactiveTemplate = await request(baseUrl, '/api/templates', {
+      method: 'POST',
+      token: admin.token,
+      body: {
+        label: 'Inactive smoke template',
+        value: 'inactive_smoke',
+        isActive: false,
+        fields: [{ name: 'purpose', label: 'Purpose', type: 'text', required: true }],
+      },
+    });
+    assert.equal(inactiveTemplate.response.status, 201);
+    const employeeTemplates = await request(baseUrl, '/api/templates', {
+      token: employee.token,
+    });
+    assert.equal(employeeTemplates.response.status, 200);
+    assert.equal(
+      employeeTemplates.payload.some((template) => template.value === 'inactive_smoke'),
+      false
+    );
+    await expectStatus(baseUrl, '/api/letter-requests', {
+      method: 'POST',
+      token: employee.token,
+      body: {
+        letterType: 'inactive_smoke',
+        details: { purpose: 'This should be rejected' },
+      },
+    }, 400);
+    await expectStatus(baseUrl, '/api/letter-requests', {
+      method: 'POST',
+      token: employee.token,
+      body: {
+        letterType: 'visa',
+        details: {
+          country: 'Canada',
+          duration: 'Two weeks',
+          purpose: 'Business travel',
+          undeclared: 'Not accepted',
+        },
+      },
+    }, 400);
+
     const created = await request(baseUrl, '/api/letter-requests', {
       method: 'POST',
       token: employee.token,
       body: {
         letterType: 'visa',
         address: '10 Bridge Street',
-        details: { country: 'Canada' },
+        details: {
+          country: 'Canada',
+          duration: 'Two weeks',
+          purpose: 'Business travel',
+        },
         employeeComments: 'Live smoke request',
       },
     });
     assert.equal(created.response.status, 201);
     assert.equal(created.payload.request.address, '10 Bridge Street');
     const requestId = created.payload.request._id;
-    const downloadResponse = await fetch(
+    const unreleasedDownload = await fetch(
       `${baseUrl}/api/letter-requests/${requestId}/download-letter`,
       { headers: { Authorization: `Bearer ${employee.token}` } }
     );
-    assert.equal(downloadResponse.status, 200);
-    assert.match(downloadResponse.headers.get('content-type') || '', /officedocument/);
-    const downloadedDocument = Buffer.from(await downloadResponse.arrayBuffer());
-    assert.equal(downloadedDocument.subarray(0, 2).toString(), 'PK');
+    assert.equal(unreleasedDownload.status, 403);
+
+    const adminDownload = await fetch(
+      `${baseUrl}/api/letter-requests/${requestId}/download-letter`,
+      { headers: { Authorization: `Bearer ${admin.token}` } }
+    );
+    assert.equal(adminDownload.status, 200);
+    assert.match(adminDownload.headers.get('content-type') || '', /officedocument/);
 
     const ownRequests = await request(
       baseUrl,
@@ -135,11 +184,25 @@ async function run() {
     });
     assert.equal(approved.response.status, 200);
     assert.equal(approved.payload.request.status, 'approved');
+    const releasedDownload = await fetch(
+      `${baseUrl}/api/letter-requests/${requestId}/download-letter`,
+      { headers: { Authorization: `Bearer ${employee.token}` } }
+    );
+    assert.equal(releasedDownload.status, 200);
+    const downloadedDocument = Buffer.from(await releasedDownload.arrayBuffer());
+    assert.equal(downloadedDocument.subarray(0, 2).toString(), 'PK');
 
     const withdrawable = await request(baseUrl, '/api/letter-requests', {
       method: 'POST',
       token: employee.token,
-      body: { letterType: 'visa', details: { country: 'Japan' } },
+      body: {
+        letterType: 'visa',
+        details: {
+          country: 'Japan',
+          duration: 'One week',
+          purpose: 'Conference',
+        },
+      },
     });
     const withdrawId = withdrawable.payload.request._id;
     await expectStatus(baseUrl, `/api/letter-requests/${withdrawId}/withdraw`, {
@@ -153,6 +216,54 @@ async function run() {
     );
     assert.equal(withdrawn.response.status, 200);
     assert.equal(withdrawn.payload.status, 'withdrawn');
+    const resubmitted = await request(
+      baseUrl,
+      `/api/letter-requests/${withdrawId}/retake`,
+      {
+        method: 'PUT',
+        token: employee.token,
+        body: {
+          letterType: 'visa',
+          details: {
+            country: 'Japan',
+            duration: 'One week',
+            purpose: 'Conference',
+          },
+        },
+      }
+    );
+    assert.equal(resubmitted.response.status, 200);
+    assert.equal(resubmitted.payload.request.status, 'pending');
+    await expectStatus(baseUrl, `/api/letter-requests/${withdrawId}/retake`, {
+      method: 'PUT',
+      token: employee.token,
+      body: {},
+    }, 409);
+
+    const newEmployeePassword = crypto.randomBytes(24).toString('base64url');
+    await expectStatus(baseUrl, '/api/employees/EMP-001/change-password', {
+      method: 'POST',
+      token: employee.token,
+      body: {
+        oldPassword: 'incorrect-current-password',
+        newPassword: newEmployeePassword,
+      },
+    }, 403);
+    await expectStatus(baseUrl, '/api/employees/EMP-001/change-password', {
+      method: 'POST',
+      token: employee.token,
+      body: {
+        oldPassword: employeePassword,
+        newPassword: newEmployeePassword,
+      },
+    }, 200);
+    await expectStatus(baseUrl, '/api/employees/EMP-001/profile', {
+      token: employee.token,
+    }, 401);
+    const renewedEmployee = await login(baseUrl, 'EMP-001', newEmployeePassword);
+    await expectStatus(baseUrl, '/api/employees/EMP-001/profile', {
+      token: renewedEmployee.token,
+    }, 200);
 
     console.log('Live MongoDB smoke test passed.');
   } catch (error) {

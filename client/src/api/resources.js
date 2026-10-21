@@ -60,6 +60,10 @@ export const letterRequestApi = {
     `/api/letter-requests/${encode(requestId)}/withdraw`,
     { method: 'POST' },
   ),
+  retake: (requestId, request) => apiRequest(
+    `/api/letter-requests/${encode(requestId)}/retake`,
+    { method: 'PUT', body: request },
+  ),
   download: (requestId) => apiRequest(
     `/api/letter-requests/${encode(requestId)}/download-letter`,
     { responseType: 'blob' },

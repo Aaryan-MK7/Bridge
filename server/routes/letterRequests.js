@@ -3,7 +3,6 @@ const fs = require('fs');
 const fsp = require('fs').promises;
 const { safeLetterRequestDto } = require('../domain/letterRequests');
 const {
-  REQUEST_STATUSES,
   canTransitionRequestStatus,
 } = require('../domain/requestStatus');
 const { AppError, asyncHandler } = require('../middleware/errors');
@@ -19,6 +18,7 @@ const {
 function createLetterRequestsRouter({
   LetterRequest,
   Employee,
+  LetterTemplate,
   auth,
   letterGenerator,
   emailService,
@@ -32,6 +32,8 @@ function createLetterRequestsRouter({
   router.post('/', asyncHandler(async (req, res) => {
     requireObject(req.body);
     const input = parseEmployeeRequestInput(req.body);
+    const template = await findActiveTemplate(LetterTemplate, input.letterType);
+    input.details = validateTemplateDetails(input.details, template.fields);
     const request = new LetterRequest({
       employeeId: req.employee.employeeId,
       employeeName: req.employee.name,
@@ -106,47 +108,44 @@ function createLetterRequestsRouter({
     validateObjectId(req.params.id, 'request id');
     requireObject(req.body);
     const status = requiredString(req.body.status, 'status', { maxLength: 40 });
-    if (!REQUEST_STATUSES.includes(status)) {
-      throw new AppError(400, 'INVALID_STATUS', 'Unknown letter request status');
+    if (!['approved', 'rejected'].includes(status)) {
+      throw new AppError(400, 'INVALID_STATUS', 'Administrators may only approve or reject pending requests');
     }
-    const request = await findRequestOrThrow(LetterRequest, req.params.id);
-    assertTransition(request.status, status);
-
-    request.status = status;
-    if (req.body.adminNotes !== undefined) {
-      request.adminNotes = optionalString(
+    const adminNotes = req.body.adminNotes === undefined
+      ? ''
+      : optionalString(
         req.body.adminNotes,
         'adminNotes',
         { maxLength: 4000 }
       ) || '';
+    const update = {
+      status,
+      adminNotes,
+      processedDate: new Date(),
+    };
+    if (status === 'rejected') {
+      Object.assign(update, emptyGeneratedDocument(), emptyDocuSign());
     }
-    if (status !== 'pending') request.processedDate = new Date();
-    await request.save();
-
-    let integration;
-    const adminEmail = req.body.adminEmail
-      ? validateEmail(req.body.adminEmail, 'adminEmail', { required: true })
-      : undefined;
-    if (status === 'approved' && adminEmail) {
-      integration = await trySendToDocuSign({
-        request,
-        adminEmail,
-        admin: req.employee,
-        docusignRegistry,
-        config,
-      });
+    const previous = await LetterRequest.findOneAndUpdate(
+      { _id: req.params.id, status: 'pending' },
+      { $set: update },
+      { new: false, runValidators: true }
+    );
+    if (!previous) {
+      const existing = await findRequestOrThrow(LetterRequest, req.params.id);
+      assertTransition(existing.status, status);
+      throw new AppError(409, 'REQUEST_ALREADY_DECIDED', 'The request was already updated');
     }
-
-    await notifyStatusChange({ request, Employee, emailService, adminEmail });
-    const body = { request: safeLetterRequestDto(request) };
-    if (integration) body.integration = integration;
-    res.json(body);
+    if (status === 'rejected') await deleteGeneratedDocument(previous);
+    const request = await findRequestOrThrow(LetterRequest, req.params.id);
+    await notifyStatusChange({ request, Employee, emailService });
+    res.json({ request: safeLetterRequestDto(request) });
   }));
 
   router.get('/:id/download-letter', asyncHandler(async (req, res, next) => {
     validateObjectId(req.params.id, 'request id');
     const request = await findRequestOrThrow(LetterRequest, req.params.id);
-    assertRequestAccess(req.employee, request);
+    assertDocumentAccess(req.employee, request);
     await assertGeneratedFile(request);
 
     res.setHeader(
@@ -165,7 +164,7 @@ function createLetterRequestsRouter({
   router.get('/:id/preview-letter', asyncHandler(async (req, res) => {
     validateObjectId(req.params.id, 'request id');
     const request = await findRequestOrThrow(LetterRequest, req.params.id);
-    assertRequestAccess(req.employee, request);
+    assertDocumentAccess(req.employee, request);
     await assertGeneratedFile(request);
     const content = await fsp.readFile(request.generatedLetterPath);
     res.json({
@@ -181,29 +180,81 @@ function createLetterRequestsRouter({
     validateObjectId(req.params.id, 'request id');
     requireObject(req.body);
     const adminEmail = validateEmail(req.body.adminEmail, 'adminEmail', { required: true });
-    const request = await findRequestOrThrow(LetterRequest, req.params.id);
-    if (!['approved', 'letter_generated'].includes(request.status)) {
+    const existing = await findRequestOrThrow(LetterRequest, req.params.id);
+    if (
+      existing.docusignEnvelopeId
+      && ['sent_for_signing', 'signed', 'completed'].includes(existing.status)
+    ) {
+      return res.json({
+        success: true,
+        alreadySent: true,
+        envelopeId: existing.docusignEnvelopeId,
+        request: safeLetterRequestDto(existing),
+      });
+    }
+    await assertGeneratedFile(existing);
+    const request = await LetterRequest.findOneAndUpdate(
+      {
+        _id: req.params.id,
+        status: { $in: ['approved', 'letter_generated'] },
+        docusignEnvelopeId: null,
+      },
+      {
+        $set: {
+          status: 'signing_in_progress',
+          docusignOperationStartedAt: new Date(),
+        },
+      },
+      { new: true, runValidators: true }
+    );
+    if (!request) {
       throw new AppError(
         409,
-        'INVALID_STATUS_TRANSITION',
-        'The request must be approved or have a generated letter before sending'
+        'DOCUSIGN_SEND_IN_PROGRESS',
+        'The request is already being sent or is no longer eligible'
       );
     }
-    await assertGeneratedFile(request);
-
-    const integration = await sendToDocuSign({
-      request,
-      adminEmail,
-      admin: req.employee,
-      docusignRegistry,
-      config,
-    });
-    res.json({
-      success: true,
-      message: 'Letter sent to DocuSign for signing',
-      ...integration,
-      request: safeLetterRequestDto(request),
-    });
+    const previousStatus = existing.status;
+    try {
+      const integration = await createDocuSignEnvelope({
+        request,
+        adminEmail,
+        admin: req.employee,
+        docusignRegistry,
+        config,
+      });
+      const sentRequest = await LetterRequest.findOneAndUpdate(
+        { _id: request._id, status: 'signing_in_progress' },
+        {
+          $set: {
+            status: 'sent_for_signing',
+            docusignEnvelopeId: integration.envelopeId,
+            docusignEnvelopeStatus: 'sent',
+            docusignSentDate: new Date(),
+          },
+          $unset: { docusignOperationStartedAt: 1 },
+        },
+        { new: true, runValidators: true }
+      );
+      if (!sentRequest) {
+        throw new AppError(409, 'DOCUSIGN_STATE_CHANGED', 'The request changed while sending');
+      }
+      return res.json({
+        success: true,
+        message: 'Letter sent to DocuSign for signing',
+        ...integration,
+        request: safeLetterRequestDto(sentRequest),
+      });
+    } catch (error) {
+      await LetterRequest.updateOne(
+        { _id: request._id, status: 'signing_in_progress', docusignEnvelopeId: null },
+        {
+          $set: { status: previousStatus },
+          $unset: { docusignOperationStartedAt: 1 },
+        }
+      );
+      throw error;
+    }
   }));
 
   router.get('/:id/docusign-status', auth.requireAdmin, asyncHandler(async (req, res) => {
@@ -241,7 +292,8 @@ function createLetterRequestsRouter({
       request.docusignEnvelopeId,
       req.employee.email,
       req.employee.name,
-      `${config.frontendUrl}/admin/requests`
+      `${config.frontendUrl}/admin/requests`,
+      String(req.employee._id)
     );
     res.json({
       signingUrl,
@@ -251,43 +303,81 @@ function createLetterRequestsRouter({
 
   router.post('/:id/withdraw', asyncHandler(async (req, res) => {
     validateObjectId(req.params.id, 'request id');
+    const previous = await LetterRequest.findOneAndUpdate(
+      {
+        _id: req.params.id,
+        employeeId: req.employee.employeeId,
+        status: 'pending',
+      },
+      {
+        $set: {
+          status: 'withdrawn',
+          processedDate: new Date(),
+          ...emptyGeneratedDocument(),
+          ...emptyDocuSign(),
+        },
+      },
+      { new: false, runValidators: true }
+    );
+    if (!previous) {
+      const existing = await findRequestOrThrow(LetterRequest, req.params.id);
+      assertRequestOwner(req.employee, existing);
+      assertTransition(existing.status, 'withdrawn');
+      throw new AppError(409, 'REQUEST_STATE_CHANGED', 'The request was already updated');
+    }
+    await deleteGeneratedDocument(previous);
     const request = await findRequestOrThrow(LetterRequest, req.params.id);
-    assertRequestOwner(req.employee, request);
-    assertTransition(request.status, 'withdrawn');
-    request.status = 'withdrawn';
-    request.processedDate = new Date();
-    await request.save();
     res.json(safeLetterRequestDto(request));
   }));
 
   router.put('/:id/retake', asyncHandler(async (req, res) => {
     validateObjectId(req.params.id, 'request id');
     requireObject(req.body);
-    const request = await findRequestOrThrow(LetterRequest, req.params.id);
-    assertRequestOwner(req.employee, request);
-    assertTransition(request.status, 'pending');
-
-    if (req.body.letterType !== undefined) {
-      request.letterType = requiredString(req.body.letterType, 'letterType', { maxLength: 120 });
-    }
-    if (req.body.details !== undefined) request.details = sanitizeDetails(req.body.details);
+    const existing = await findRequestOrThrow(LetterRequest, req.params.id);
+    assertRequestOwner(req.employee, existing);
+    assertResubmittable(existing.status);
+    const letterType = req.body.letterType === undefined
+      ? existing.letterType
+      : requiredString(req.body.letterType, 'letterType', { maxLength: 120 });
+    const template = await findActiveTemplate(LetterTemplate, letterType);
+    const details = req.body.details === undefined
+      ? existing.details
+      : sanitizeDetails(req.body.details);
+    const update = {
+      letterType,
+      details: validateTemplateDetails(details, template.fields),
+      address: existing.address || '',
+      employeeComments: existing.employeeComments || '',
+      status: 'pending',
+      requestDate: new Date(),
+      processedDate: null,
+      adminNotes: '',
+      ...emptyGeneratedDocument(),
+      ...emptyDocuSign(),
+    };
     if (req.body.address !== undefined) {
-      request.address = optionalString(req.body.address, 'address', { maxLength: 2000 }) || '';
+      update.address = optionalString(req.body.address, 'address', { maxLength: 2000 }) || '';
     }
     if (req.body.employeeComments !== undefined) {
-      request.employeeComments = optionalString(
+      update.employeeComments = optionalString(
         req.body.employeeComments,
         'employeeComments',
         { maxLength: 4000 }
       ) || '';
     }
-    request.status = 'pending';
-    request.requestDate = new Date();
-    request.processedDate = null;
-    request.adminNotes = '';
-    clearGeneratedDocument(request);
-    clearDocuSign(request);
-    await request.save();
+    const request = await LetterRequest.findOneAndUpdate(
+      {
+        _id: req.params.id,
+        employeeId: req.employee.employeeId,
+        status: existing.status,
+      },
+      { $set: update },
+      { new: true, runValidators: true }
+    );
+    if (!request) {
+      throw new AppError(409, 'REQUEST_STATE_CHANGED', 'The request was already updated');
+    }
+    await deleteGeneratedDocument(existing);
 
     let warning;
     try {
@@ -301,6 +391,90 @@ function createLetterRequestsRouter({
   }));
 
   return router;
+}
+
+async function findActiveTemplate(LetterTemplate, letterType) {
+  const template = await LetterTemplate.findOne({ value: letterType, isActive: true }).lean();
+  if (!template) {
+    throw new AppError(
+      400,
+      'LETTER_TYPE_UNAVAILABLE',
+      'The selected letter type is not available'
+    );
+  }
+  return template;
+}
+
+function validateTemplateDetails(details, fields = []) {
+  const sanitized = sanitizeDetails(details);
+  const fieldMap = new Map(fields.map((field) => [field.name, field]));
+  for (const key of Object.keys(sanitized)) {
+    if (!fieldMap.has(key)) {
+      throw new AppError(400, 'VALIDATION_ERROR', `details.${key} is not defined by the template`);
+    }
+  }
+
+  const validated = {};
+  for (const field of fields) {
+    const value = sanitized[field.name];
+    const missing = value === undefined || value === null || value === '';
+    if (missing) {
+      if (field.required !== false) {
+        throw new AppError(400, 'VALIDATION_ERROR', `${field.label || field.name} is required`);
+      }
+      continue;
+    }
+    if (field.type === 'number') {
+      if (!['string', 'number'].includes(typeof value)) {
+        throw new AppError(400, 'VALIDATION_ERROR', `${field.label || field.name} must be a number`);
+      }
+      const number = Number(value);
+      if (!Number.isFinite(number)) {
+        throw new AppError(400, 'VALIDATION_ERROR', `${field.label || field.name} must be a number`);
+      }
+      validated[field.name] = number;
+    } else if (field.type === 'date') {
+      const isIsoDate = typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value);
+      const date = isIsoDate ? new Date(`${value}T00:00:00Z`) : null;
+      if (
+        !date
+        || Number.isNaN(date.getTime())
+        || date.toISOString().slice(0, 10) !== value
+      ) {
+        throw new AppError(400, 'VALIDATION_ERROR', `${field.label || field.name} must be a date`);
+      }
+      validated[field.name] = value;
+    } else if (field.type === 'email') {
+      validated[field.name] = validateEmail(value, `details.${field.name}`, { required: true });
+    } else {
+      if (typeof value !== 'string') {
+        throw new AppError(400, 'VALIDATION_ERROR', `${field.label || field.name} must be text`);
+      }
+      validated[field.name] = value;
+    }
+  }
+  return validated;
+}
+
+async function deleteGeneratedDocument(request) {
+  if (!request.generatedLetterPath) return;
+  try {
+    await fsp.unlink(request.generatedLetterPath);
+  } catch (error) {
+    if (error.code !== 'ENOENT') {
+      throw new AppError(500, 'DOCUMENT_DELETE_FAILED', 'The previous letter could not be removed');
+    }
+  }
+}
+
+function assertResubmittable(status) {
+  if (!['rejected', 'withdrawn'].includes(status)) {
+    throw new AppError(
+      409,
+      'INVALID_STATUS_TRANSITION',
+      `Letter request status cannot change from ${status} to pending`
+    );
+  }
 }
 
 function parseEmployeeRequestInput(body) {
@@ -338,23 +512,7 @@ async function generateLetter({ request, letterGenerator }) {
   await request.save();
 }
 
-async function trySendToDocuSign(args) {
-  try {
-    if (!args.request.generatedLetterPath) {
-      return { docusign: 'unavailable', message: 'No generated document is available.' };
-    }
-    return { docusign: 'sent', ...(await sendToDocuSign(args)) };
-  } catch (error) {
-    return {
-      docusign: 'unavailable',
-      message: error instanceof AppError
-        ? error.message
-        : 'DocuSign is currently unavailable; the request remains approved.',
-    };
-  }
-}
-
-async function sendToDocuSign({
+async function createDocuSignEnvelope({
   request,
   adminEmail,
   admin,
@@ -371,16 +529,9 @@ async function sendToDocuSign({
     docFile: content.toString('base64'),
     documentName: safeFilename(request.generatedLetterFilename),
     emailSubject: `Please sign ${request.employeeName}'s ${request.letterType} letter`,
-    anchorString: '/sn1/',
+    transactionId: String(request._id),
     dsReturnUrl: `${config.frontendUrl}/admin/requests`,
   });
-
-  assertTransition(request.status, 'sent_for_signing');
-  request.status = 'sent_for_signing';
-  request.docusignEnvelopeId = result.envelopeId;
-  request.docusignEnvelopeStatus = 'sent';
-  request.docusignSentDate = new Date();
-  await request.save();
   return { envelopeId: result.envelopeId, redirectUrl: result.redirectUrl };
 }
 
@@ -392,7 +543,7 @@ function getAuthenticatedDocuSignService(registry, employee) {
   return service;
 }
 
-async function notifyStatusChange({ request, Employee, emailService, adminEmail }) {
+async function notifyStatusChange({ request, Employee, emailService }) {
   if (!['approved', 'rejected'].includes(request.status)) return;
   const employee = await Employee.findOne({ employeeId: request.employeeId });
   if (!employee?.email) return;
@@ -403,9 +554,9 @@ async function notifyStatusChange({ request, Employee, emailService, adminEmail 
     letterType: request.letterType,
   };
   if (request.status === 'approved') {
-    await emailService.sendLetterApprovalNotification(data, adminEmail);
+    await emailService.sendLetterApprovalNotification(data);
   } else {
-    await emailService.sendLetterRejectionNotification(data, adminEmail, request.adminNotes);
+    await emailService.sendLetterRejectionNotification(data, undefined, request.adminNotes);
   }
 }
 
@@ -422,8 +573,16 @@ async function findRequestOrThrow(LetterRequest, id) {
   return request;
 }
 
-function assertRequestAccess(employee, request) {
-  if (employee.role !== 'admin') assertRequestOwner(employee, request);
+function assertDocumentAccess(employee, request) {
+  if (employee.role === 'admin') return;
+  assertRequestOwner(employee, request);
+  if (!['approved', 'completed'].includes(request.status)) {
+    throw new AppError(
+      403,
+      'DOCUMENT_NOT_RELEASED',
+      'The letter is not available until the request is approved'
+    );
+  }
 }
 
 function assertRequestOwner(employee, request) {
@@ -457,23 +616,30 @@ function safeFilename(filename) {
   return String(filename || 'letter.docx').replace(/[^A-Za-z0-9._-]/g, '_');
 }
 
-function clearGeneratedDocument(request) {
-  request.generatedLetterPath = null;
-  request.generatedLetterFilename = null;
-  request.letterGeneratedDate = null;
+
+function emptyGeneratedDocument() {
+  return {
+    generatedLetterPath: null,
+    generatedLetterFilename: null,
+    letterGeneratedDate: null,
+  };
 }
 
-function clearDocuSign(request) {
-  request.docusignEnvelopeId = null;
-  request.docusignEnvelopeStatus = null;
-  request.docusignSigningUrl = null;
-  request.docusignTemplateId = null;
-  request.docusignSentDate = null;
-  request.docusignCompletedDate = null;
+function emptyDocuSign() {
+  return {
+    docusignEnvelopeId: null,
+    docusignEnvelopeStatus: null,
+    docusignSigningUrl: null,
+    docusignTemplateId: null,
+    docusignSentDate: null,
+    docusignOperationStartedAt: null,
+    docusignCompletedDate: null,
+  };
 }
 
 module.exports = {
   assertTransition,
   createLetterRequestsRouter,
   parseEmployeeRequestInput,
+  validateTemplateDetails,
 };

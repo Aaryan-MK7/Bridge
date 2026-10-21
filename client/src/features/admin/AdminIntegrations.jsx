@@ -83,6 +83,11 @@ export default function AdminIntegrations() {
     setWorking(true);
     try {
       const result = await docusignApi.getOAuthUrl();
+      if (result.success) {
+        setNotice('DocuSign connected.');
+        await loadIntegration();
+        return;
+      }
       if (!openTrustedUrl(result.authUrl)) throw new Error('The server did not return a secure authorization URL.');
       setNotice('Complete authorization in the new tab, then refresh the status.');
     } catch (error) {

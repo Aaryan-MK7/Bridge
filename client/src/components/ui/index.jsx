@@ -1,3 +1,4 @@
+import { useEffect, useId, useRef } from 'react';
 import { Icon } from './Icon.jsx';
 
 export function Button({
@@ -103,22 +104,76 @@ export function LoadingState({ label = 'Loading' }) {
 }
 
 export function Dialog({ children, description, onClose, open, title }) {
+  const dialogRef = useRef(null);
+  const onCloseRef = useRef(onClose);
+  const titleId = useId();
+  const descriptionId = useId();
+  onCloseRef.current = onClose;
+
+  useEffect(() => {
+    if (!open) return undefined;
+    const previousFocus = document.activeElement;
+    const dialog = dialogRef.current;
+    const focusableSelector = [
+      'button:not([disabled])',
+      'a[href]',
+      'input:not([disabled])',
+      'select:not([disabled])',
+      'textarea:not([disabled])',
+      '[tabindex]:not([tabindex="-1"])',
+    ].join(',');
+    const focusable = () => [...dialog.querySelectorAll(focusableSelector)];
+    const frame = window.requestAnimationFrame(() => {
+      (focusable()[0] || dialog).focus();
+    });
+    const handleKeyDown = (event) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        onCloseRef.current();
+        return;
+      }
+      if (event.key !== 'Tab') return;
+      const elements = focusable();
+      if (!elements.length) {
+        event.preventDefault();
+        dialog.focus();
+        return;
+      }
+      const first = elements[0];
+      const last = elements[elements.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      document.removeEventListener('keydown', handleKeyDown);
+      if (previousFocus instanceof HTMLElement) previousFocus.focus();
+    };
+  }, [open]);
   if (!open) return null;
   return (
     <div className="dialog-backdrop" onMouseDown={(event) => {
       if (event.target === event.currentTarget) onClose();
     }}>
       <section
-        aria-describedby={description ? 'dialog-description' : undefined}
-        aria-labelledby="dialog-title"
+        aria-describedby={description ? descriptionId : undefined}
+        aria-labelledby={titleId}
         aria-modal="true"
         className="dialog"
+        ref={dialogRef}
         role="dialog"
+        tabIndex="-1"
       >
         <header className="dialog__header">
           <div>
-            <h2 id="dialog-title">{title}</h2>
-            {description ? <p id="dialog-description">{description}</p> : null}
+            <h2 id={titleId}>{title}</h2>
+            {description ? <p id={descriptionId}>{description}</p> : null}
           </div>
           <button aria-label="Close dialog" className="icon-button" onClick={onClose} type="button">
             <Icon name="close" />

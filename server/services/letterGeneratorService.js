@@ -1,4 +1,4 @@
-const { Document, Packer, Paragraph, TextRun, AlignmentType, HeadingLevel, Table, TableRow, TableCell, WidthType } = require('docx');
+const { Document, Packer, Paragraph, AlignmentType, HeadingLevel } = require('docx');
 const PizZip = require('pizzip');
 const Docxtemplater = require('docxtemplater');
 const fs = require('fs');

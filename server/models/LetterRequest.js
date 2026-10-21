@@ -20,7 +20,7 @@ const letterRequestSchema = new mongoose.Schema({
   },
   status: {
     type: String,
-    enum: ['pending', 'approved', 'rejected', 'withdrawn', 'letter_generated', 'sent_for_signing', 'signed', 'completed'],
+    enum: ['pending', 'approved', 'rejected', 'withdrawn', 'letter_generated', 'signing_in_progress', 'sent_for_signing', 'signed', 'completed'],
     default: 'pending'
   },
   requestDate: {
@@ -73,6 +73,10 @@ const letterRequestSchema = new mongoose.Schema({
     default: null
   },
   docusignSentDate: {
+    type: Date,
+    default: null
+  },
+  docusignOperationStartedAt: {
     type: Date,
     default: null
   },

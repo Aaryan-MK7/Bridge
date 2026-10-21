@@ -1,5 +1,6 @@
 const express = require('express');
 const cors = require('cors');
+const helmet = require('helmet');
 const mongoose = require('mongoose');
 const Employee = require('./models/Employee');
 const LetterRequest = require('./models/LetterRequest');
@@ -20,7 +21,6 @@ const { DocuSignRegistry } = require('./services/docusignRegistry');
 const { createEmployeesRouter } = require('./routes/employees');
 const { createLetterRequestsRouter } = require('./routes/letterRequests');
 const { createTemplatesRouter } = require('./routes/templates');
-const { createPdfFillerRouter } = require('./routes/pdfFiller');
 const { createSettingsRouter } = require('./routes/settings');
 const { createDocuSignRouter } = require('./routes/docusign');
 
@@ -49,6 +49,7 @@ function createApp(options = {}) {
 
   const app = express();
   app.disable('x-powered-by');
+  app.use(helmet());
   app.use(cors(createCorsOptions(config.frontendOrigins)));
   app.use(express.json({ limit: '10mb' }));
 
@@ -72,6 +73,7 @@ function createApp(options = {}) {
   app.use('/api/letter-requests', createLetterRequestsRouter({
     LetterRequest: models.LetterRequest,
     Employee: models.Employee,
+    LetterTemplate: models.LetterTemplate,
     auth,
     letterGenerator,
     emailService,
@@ -83,7 +85,6 @@ function createApp(options = {}) {
     LetterTemplate: models.LetterTemplate,
     auth,
   }));
-  app.use('/api/pdf-filler', createPdfFillerRouter({ auth }));
   app.use('/api/settings', createSettingsRouter({
     Setting: models.Setting,
     auth,

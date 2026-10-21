@@ -39,6 +39,7 @@ export default function LoginPage() {
       title="Sign in to Bridge"
     >
       <form className="auth-form" onSubmit={handleSubmit}>
+        {location.state?.notice ? <Alert variant="success">{location.state.notice}</Alert> : null}
         {error ? <Alert variant="danger">{error}</Alert> : null}
         <Field
           autoComplete="username"

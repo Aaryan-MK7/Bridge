@@ -72,6 +72,35 @@ export default function AdminRequests() {
     }
   };
 
+  const continueSigning = async (request) => {
+    setWorking(request._id);
+    try {
+      const result = await letterRequestApi.getSigningUrl(request._id);
+      if (!result.signingUrl) {
+        throw new Error('DocuSign did not return a signing URL.');
+      }
+      window.open(result.signingUrl, '_blank', 'noopener,noreferrer');
+      setNotice('DocuSign signing opened in a new tab.');
+    } catch (error) {
+      setNotice(error.message);
+    } finally {
+      setWorking('');
+    }
+  };
+
+  const refreshDocuSignStatus = async (request) => {
+    setWorking(request._id);
+    try {
+      const result = await letterRequestApi.getDocuSignStatus(request._id);
+      setNotice(`DocuSign status: ${formatLetterType(result.status || 'unknown')}.`);
+      await loadRequests();
+    } catch (error) {
+      setNotice(error.message);
+    } finally {
+      setWorking('');
+    }
+  };
+
   const downloadLetter = async (request) => {
     setWorking(request._id);
     try {
@@ -167,7 +196,7 @@ export default function AdminRequests() {
                     <td data-label="Status"><StatusBadge status={request.status} /></td>
                     <td className="table-actions">
                       <Button onClick={() => setSelected(request)} variant="ghost">Review</Button>
-                      {['approved', 'completed'].includes(request.status) ? (
+                      {['letter_generated', 'approved', 'sent_for_signing', 'completed'].includes(request.status) ? (
                         <Button
                           icon="download"
                           loading={working === request._id}
@@ -216,10 +245,16 @@ export default function AdminRequests() {
             </dl>
             <div className="form-actions form-actions--between">
               <div className="button-group">
-                {['pending', 'letter_generated'].includes(selected.status) ? (
+                {selected.status === 'pending' ? (
                   <>
-                    <Button onClick={() => setDecision({ request: selected, status: 'rejected' })} variant="danger-ghost">Reject</Button>
-                    <Button onClick={() => setDecision({ request: selected, status: 'approved' })}>Approve</Button>
+                    <Button onClick={() => {
+                      setDecision({ request: selected, status: 'rejected' });
+                      setSelected(null);
+                    }} variant="danger-ghost">Reject</Button>
+                    <Button onClick={() => {
+                      setDecision({ request: selected, status: 'approved' });
+                      setSelected(null);
+                    }}>Approve</Button>
                   </>
                 ) : null}
               </div>
@@ -231,6 +266,24 @@ export default function AdminRequests() {
                 >
                   Send to DocuSign
                 </Button>
+              ) : null}
+              {selected.status === 'sent_for_signing' ? (
+                <div className="button-group">
+                  <Button
+                    loading={working === selected._id}
+                    onClick={() => continueSigning(selected)}
+                    variant="secondary"
+                  >
+                    Continue signing
+                  </Button>
+                  <Button
+                    loading={working === selected._id}
+                    onClick={() => refreshDocuSignStatus(selected)}
+                    variant="ghost"
+                  >
+                    Refresh status
+                  </Button>
+                </div>
               ) : null}
             </div>
           </div>

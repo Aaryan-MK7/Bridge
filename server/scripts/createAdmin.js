@@ -28,19 +28,23 @@ async function createAdmin() {
 
   await connectDatabase({ mongoUri: config.mongoUri });
   const passwordHash = await bcrypt.hash(password, 12);
-  await Employee.findOneAndUpdate(
-    { employeeId },
-    {
-      $set: {
-        name,
-        email,
-        passwordHash,
-        role: 'admin',
-      },
-      $setOnInsert: { employeeId },
-    },
-    { new: true, runValidators: true, upsert: true }
-  );
+  const existing = await Employee.findOne({ employeeId }).select('+passwordHash');
+  if (existing) {
+    existing.name = name;
+    existing.email = email;
+    existing.passwordHash = passwordHash;
+    existing.role = 'admin';
+    existing.authVersion = (existing.authVersion || 0) + 1;
+    await existing.save();
+  } else {
+    await Employee.create({
+      employeeId,
+      name,
+      email,
+      passwordHash,
+      role: 'admin',
+    });
+  }
   console.log(`Administrator ${employeeId} is ready.`);
 }
 

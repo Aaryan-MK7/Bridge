@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { mergeLetterTypes } from '../features/employee/letterTypes.js';
 
 import {
   formatLetterType,
@@ -72,4 +73,13 @@ test('API errors and letter labels are normalized for display', () => {
     'Administrator access is required',
   );
   assert.equal(formatLetterType('travel_noc'), 'Travel Noc');
+});
+
+test('employee letter types are derived only from active server templates', () => {
+  const templates = mergeLetterTypes([
+    { value: 'visa', label: 'Visa', isActive: false, fields: [] },
+    { value: 'custom', label: 'Custom', isActive: true, fields: [] },
+  ]);
+
+  assert.deepEqual(templates.map((template) => template.value), ['custom']);
 });

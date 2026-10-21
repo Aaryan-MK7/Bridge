@@ -66,6 +66,25 @@ export default function EmployeeHistory() {
     }
   };
 
+  const handleRetake = async (request) => {
+    setWorkingId(request._id);
+    setNotice('');
+    try {
+      const result = await letterRequestApi.retake(request._id, {
+        letterType: request.letterType,
+        details: request.details || {},
+        address: request.address || '',
+        employeeComments: request.employeeComments || '',
+      });
+      setNotice(result.warning || 'The request was resubmitted.');
+      await loadRequests();
+    } catch (error) {
+      setNotice(error.message);
+    } finally {
+      setWorkingId('');
+    }
+  };
+
   const handleWithdraw = async () => {
     if (!confirmWithdraw) return;
     setWorkingId(confirmWithdraw._id);
@@ -91,7 +110,7 @@ export default function EmployeeHistory() {
       />
 
       {notice ? (
-        <Alert variant={/failed|unable|error/i.test(notice) ? 'danger' : 'success'}>
+        <Alert variant={/failed|unable|error|could not/i.test(notice) ? 'danger' : 'success'}>
           {notice}
         </Alert>
       ) : null}
@@ -157,6 +176,15 @@ export default function EmployeeHistory() {
                       {isRequestOpen(request.status) ? (
                         <Button onClick={() => setConfirmWithdraw(request)} variant="danger-ghost">
                           Withdraw
+                        </Button>
+                      ) : null}
+                      {['rejected', 'withdrawn'].includes(request.status) ? (
+                        <Button
+                          loading={workingId === request._id}
+                          onClick={() => handleRetake(request)}
+                          variant="secondary"
+                        >
+                          Resubmit
                         </Button>
                       ) : null}
                     </td>

@@ -5,7 +5,10 @@ const { safeLetterRequestDto } = require('../domain/letterRequests');
 const {
   canTransitionRequestStatus,
 } = require('../domain/requestStatus');
-const { parseEmployeeRequestInput } = require('../routes/letterRequests');
+const {
+  parseEmployeeRequestInput,
+  validateTemplateDetails,
+} = require('../routes/letterRequests');
 const { createTokenService } = require('../services/tokenService');
 const {
   sanitizeDetails,
@@ -21,11 +24,13 @@ test('JWT contract signs scoped employee claims and rejects tampering', () => {
   const token = tokens.sign({
     _id: '507f1f77bcf86cd799439011',
     employeeId: 'EMP-100',
+    authVersion: 3,
   });
   const claims = tokens.verify(token);
 
   assert.equal(claims.sub, '507f1f77bcf86cd799439011');
   assert.equal(claims.employeeId, 'EMP-100');
+  assert.equal(claims.authVersion, 3);
   assert.equal(claims.iss, 'bridge-api');
   assert.throws(() => tokens.verify(`${token}tampered`));
 });
@@ -96,5 +101,29 @@ test('letter request input preserves sanitized address and comments', () => {
       employeeComments: 'For the consulate',
       details: { country: 'Canada' },
     }
+  );
+});
+
+test('template fields reject undeclared or invalid details and normalize values', () => {
+  const fields = [
+    { name: 'amount', label: 'Amount', type: 'number', required: true },
+    { name: 'contact', label: 'Contact', type: 'email', required: false },
+  ];
+  assert.deepEqual(
+    validateTemplateDetails({ amount: '42', contact: ' HR@Example.COM ' }, fields),
+    { amount: 42, contact: 'hr@example.com' }
+  );
+  assert.throws(() => validateTemplateDetails({}, fields), /Amount is required/);
+  assert.throws(
+    () => validateTemplateDetails({ amount: 42, extra: 'not allowed' }, fields),
+    /not defined by the template/
+  );
+  assert.throws(() => validateTemplateDetails({ amount: false }, fields), /must be a number/);
+  assert.throws(
+    () => validateTemplateDetails(
+      { startDate: '2026-02-30' },
+      [{ name: 'startDate', label: 'Start date', type: 'date', required: true }]
+    ),
+    /must be a date/
   );
 });
