@@ -1,5 +1,9 @@
 # Bridge
 
+[![Project preview](https://github.com/Aaryan-MK7/Bridge/actions/workflows/pages.yml/badge.svg)](https://aaryan-mk7.github.io/Bridge/)
+
+**[Open the public project preview →](https://aaryan-mk7.github.io/Bridge/)**
+
 Bridge is an internal employee-letter workflow for collecting structured requests, generating documents, routing decisions through HR, and optionally sending approved letters through DocuSign. It provides separate employee and administrator workspaces backed by one authenticated Express API and MongoDB.
 
 ## What Bridge does

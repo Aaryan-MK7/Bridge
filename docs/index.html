@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Bridge project preview — employee requests and HR approvals in one clear workflow.">
+  <title>Bridge — Project Preview</title>
+  <style>
+    :root { color-scheme:light; --bg:#f5f7fa; --panel:#fff; --ink:#14213d; --muted:#667085; --line:#dbe1ea; --blue:#2257d6; --aqua:#45c7b7; --max:1180px; }
+    * { box-sizing:border-box; }
+    body { margin:0; overflow-x:hidden; background:linear-gradient(145deg,#eef4ff,transparent 42%),var(--bg); color:var(--ink); font:16px/1.55 Inter,ui-sans-serif,system-ui,sans-serif; }
+    a { color:inherit; } .shell { width:min(calc(100% - 2rem),var(--max)); margin:auto; }
+    nav { display:flex; justify-content:space-between; align-items:center; padding:1.15rem 0; border-bottom:1px solid var(--line); }
+    .brand { display:flex; align-items:center; gap:.55rem; font-weight:850; } .mark { display:grid; width:2rem; height:2rem; place-items:center; border-radius:.5rem; background:var(--blue); color:white; }
+    .button { display:inline-flex; padding:.65rem .9rem; border:1px solid var(--line); border-radius:.55rem; text-decoration:none; font-size:.8rem; font-weight:750; background:var(--panel); }
+    header { display:grid; grid-template-columns:.85fr 1.15fr; align-items:center; gap:4rem; padding:4.5rem 0; }
+    .eyebrow { color:var(--blue); font:750 .7rem/1 ui-monospace,monospace; letter-spacing:.12em; text-transform:uppercase; }
+    h1 { margin:.8rem 0 1.3rem; font-size:clamp(3.3rem,7vw,6.5rem); line-height:.9; letter-spacing:-.07em; }
+    .lede { max-width:45ch; color:var(--muted); }
+    .note { margin-top:1.3rem; padding:.7rem .85rem; border-left:2px solid var(--aqua); color:var(--muted); font-size:.78rem; }
+    .dashboard { border:1px solid var(--line); border-radius:1rem; background:var(--panel); box-shadow:0 28px 80px #37517a20; overflow:hidden; }
+    .topbar { display:flex; align-items:center; justify-content:space-between; padding:.85rem 1rem; border-bottom:1px solid var(--line); }
+    .search { width:42%; padding:.55rem .75rem; border:1px solid var(--line); border-radius:.45rem; color:#98a2b3; font-size:.7rem; }
+    .dashbody { display:grid; grid-template-columns:9rem 1fr; min-height:29rem; }
+    .sidebar { padding:1rem .75rem; border-right:1px solid var(--line); background:#fbfcfe; }
+    .navitem { padding:.65rem .7rem; border-radius:.45rem; color:var(--muted); font-size:.72rem; margin-bottom:.3rem; } .navitem.active { background:#e8efff; color:var(--blue); font-weight:750; }
+    .content { padding:1rem; overflow:hidden; }
+    .heading { display:flex; justify-content:space-between; align-items:center; }
+    .heading h2 { margin:0; font-size:1.15rem; } .new { padding:.55rem .7rem; border-radius:.4rem; background:var(--blue); color:white; font-size:.65rem; font-weight:750; }
+    .stats { display:grid; grid-template-columns:repeat(3,1fr); gap:.6rem; margin:1rem 0; }
+    .stat { padding:.75rem; border:1px solid var(--line); border-radius:.55rem; } .stat small { color:var(--muted); font-size:.58rem; text-transform:uppercase; } .stat strong { display:block; font-size:1.35rem; margin-top:.15rem; }
+    .table { border:1px solid var(--line); border-radius:.55rem; overflow:hidden; }
+    .row { display:grid; grid-template-columns:1.2fr .8fr .6fr; gap:.5rem; padding:.7rem; border-bottom:1px solid var(--line); font-size:.68rem; } .row:last-child { border:0; } .row.head { background:#f8fafc; color:var(--muted); font-weight:750; }
+    .status { width:max-content; padding:.2rem .4rem; border-radius:1rem; background:#e8f8f3; color:#08775f; font-size:.58rem; font-weight:750; }
+    section { padding:4rem 0; border-top:1px solid var(--line); }
+    section h2 { margin:0 0 2rem; font-size:clamp(2rem,4vw,3.5rem); letter-spacing:-.05em; }
+    .flow { display:grid; grid-template-columns:repeat(4,1fr); gap:1rem; }
+    .step { padding:1.2rem; border:1px solid var(--line); border-radius:.7rem; background:var(--panel); }
+    .step b { color:var(--blue); } .step h3 { margin:.6rem 0 .35rem; } .step p { margin:0; color:var(--muted); font-size:.78rem; }
+    footer { display:flex; justify-content:space-between; padding:2rem 0; color:var(--muted); font-size:.72rem; }
+    @media(max-width:780px){ header{grid-template-columns:minmax(0,1fr);gap:2rem;padding:3rem 0}header>*{min-width:0}h1{font-size:3.2rem}.flow{grid-template-columns:1fr 1fr}.dashboard{width:100%}.dashbody{grid-template-columns:4rem minmax(0,1fr)}.sidebar{padding:.75rem .35rem}.navitem{font-size:0;text-align:center}.navitem::first-letter{font-size:1rem}.content{min-width:0;padding:.75rem}.search{width:52%}.stats{grid-template-columns:1fr}.stat:nth-child(n+2){display:none}.row{grid-template-columns:minmax(0,1fr) .7fr}.row span:nth-child(2){display:none} }
+  </style>
+</head>
+<body>
+  <nav class="shell"><div class="brand"><span class="mark">B</span>Bridge</div><a class="button" href="https://github.com/Aaryan-MK7/Bridge">View source ↗</a></nav>
+  <main>
+    <header class="shell">
+      <div>
+        <p class="eyebrow">Project preview · Internal operations</p>
+        <h1>Requests move. Teams stay aligned.</h1>
+        <p class="lede">Bridge gives employees and HR one clear place to request, review, generate, and track official letters without losing context across email threads.</p>
+        <p class="note">This is a static product walkthrough. Authentication, document generation, MongoDB persistence, and integrations run in the full application.</p>
+      </div>
+      <div class="dashboard" aria-label="Representative Bridge administrator dashboard">
+        <div class="topbar"><strong>Bridge</strong><div class="search">Search requests…</div><span>AM</span></div>
+        <div class="dashbody">
+          <aside class="sidebar"><div class="navitem active">▦ Overview</div><div class="navitem">▤ Requests</div><div class="navitem">♙ People</div><div class="navitem">▧ Templates</div><div class="navitem">⚙ Settings</div></aside>
+          <div class="content">
+            <div class="heading"><h2>Request overview</h2><span class="new">+ New request</span></div>
+            <div class="stats"><div class="stat"><small>Pending</small><strong>12</strong></div><div class="stat"><small>Approved</small><strong>48</strong></div><div class="stat"><small>Completed</small><strong>37</strong></div></div>
+            <div class="table">
+              <div class="row head"><span>Request</span><span>Employee</span><span>Status</span></div>
+              <div class="row"><span>Employment letter</span><span>A. Muku</span><span class="status">Approved</span></div>
+              <div class="row"><span>Address confirmation</span><span>M. Chen</span><span class="status">Pending</span></div>
+              <div class="row"><span>Income verification</span><span>S. Patel</span><span class="status">Completed</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </header>
+    <section><div class="shell"><p class="eyebrow">The workflow</p><h2>From request to completed letter.</h2><div class="flow"><article class="step"><b>01</b><h3>Submit</h3><p>Employees choose a letter type and provide structured details.</p></article><article class="step"><b>02</b><h3>Review</h3><p>HR evaluates requests with notes and explicit state transitions.</p></article><article class="step"><b>03</b><h3>Generate</h3><p>Approved requests become downloadable organization documents.</p></article><article class="step"><b>04</b><h3>Sign</h3><p>Optional DocuSign flows move a letter through completion.</p></article></div></div></section>
+  </main>
+  <footer class="shell"><span>Bridge · Project preview</span><a href="https://github.com/Aaryan-MK7/Bridge">Repository ↗</a></footer>
+</body>
+</html>
