@@ -51,6 +51,12 @@ function createEmployeesRouter({
     requireObject(req.body);
     const employeeId = requiredString(req.body.employeeId, 'employeeId', { maxLength: 80 });
     const email = validateEmail(req.body.email, 'email', { required: true });
+    if (isProtectedDemoIdentity(config, employeeId)) {
+      return res.status(202).json({
+        success: true,
+        message: 'If the account details match, a password reset link will be sent.',
+      });
+    }
     const employee = await Employee.findOne({ employeeId });
 
     if (employee && employee.email && employee.email.toLowerCase() === email) {
@@ -76,6 +82,7 @@ function createEmployeesRouter({
     const employeeId = requiredString(req.body.employeeId, 'employeeId', { maxLength: 80 });
     const resetToken = requiredString(req.body.resetToken, 'resetToken', { maxLength: 128 });
     const newPassword = validatePassword(req.body.newPassword, 'newPassword');
+    rejectProtectedDemoMutation(config, employeeId);
     const employee = await Employee.findOne({
       employeeId,
       resetToken: hashResetToken(resetToken),
@@ -165,6 +172,7 @@ function createEmployeesRouter({
     '/:employeeId',
     auth.requireSelfOrAdmin(),
     asyncHandler(async (req, res) => {
+      rejectProtectedDemoMutation(config, req.params.employeeId);
       requireObject(req.body);
       const isAdmin = req.employee.role === 'admin';
       const allowedFields = isAdmin
@@ -187,6 +195,7 @@ function createEmployeesRouter({
     '/:employeeId',
     auth.requireAdmin,
     asyncHandler(async (req, res) => {
+      rejectProtectedDemoMutation(config, req.params.employeeId);
       if (req.params.employeeId === req.employee.employeeId) {
         throw new AppError(400, 'INVALID_OPERATION', 'Administrators cannot delete themselves');
       }
@@ -202,6 +211,7 @@ function createEmployeesRouter({
     '/:employeeId/make-admin',
     auth.requireAdmin,
     asyncHandler(async (req, res) => {
+      rejectProtectedDemoMutation(config, req.params.employeeId);
       const employee = await Employee.findOneAndUpdate(
         { employeeId: req.params.employeeId },
         { $set: { role: 'admin' } },
@@ -221,6 +231,7 @@ function createEmployeesRouter({
     '/:employeeId/remove-admin',
     auth.requireAdmin,
     asyncHandler(async (req, res) => {
+      rejectProtectedDemoMutation(config, req.params.employeeId);
       if (req.params.employeeId === req.employee.employeeId) {
         throw new AppError(400, 'INVALID_OPERATION', 'Administrators cannot demote themselves');
       }
@@ -243,6 +254,7 @@ function createEmployeesRouter({
     '/:employeeId/change-password',
     auth.requireSelfOrAdmin(),
     asyncHandler(async (req, res) => {
+      rejectProtectedDemoMutation(config, req.params.employeeId);
       requireObject(req.body);
       const oldPassword = requiredString(req.body.oldPassword, 'oldPassword', { maxLength: 128 });
       const newPassword = validatePassword(req.body.newPassword, 'newPassword');
@@ -267,6 +279,23 @@ function createEmployeesRouter({
   );
 
   return router;
+}
+
+function isProtectedDemoIdentity(config, employeeId) {
+  return Boolean(
+    config.demoMode
+    && [config.demoUserId, config.demoAdminId].includes(employeeId)
+  );
+}
+
+function rejectProtectedDemoMutation(config, employeeId) {
+  if (isProtectedDemoIdentity(config, employeeId)) {
+    throw new AppError(
+      403,
+      'DEMO_IDENTITY_PROTECTED',
+      'Shared demo identities cannot be deleted, promoted, demoted, or have their password changed'
+    );
+  }
 }
 
 function createPublicRateLimit(limit, message) {

@@ -6,7 +6,7 @@ const DEFAULT_JWT_EXPIRES_IN = '8h';
 
 function getRuntimeConfig(env = process.env) {
   const port = Number.parseInt(env.PORT || DEFAULT_PORT, 10);
-  const frontendOrigins = (env.FRONTEND_ORIGIN || DEFAULT_FRONTEND_ORIGIN)
+  const frontendOrigins = (env.FRONTEND_ORIGIN || env.RENDER_EXTERNAL_URL || DEFAULT_FRONTEND_ORIGIN)
     .split(',')
     .map((origin) => origin.trim())
     .filter(Boolean);
@@ -15,11 +15,15 @@ function getRuntimeConfig(env = process.env) {
     port: Number.isInteger(port) && port > 0 ? port : DEFAULT_PORT,
     mongoUri: env.MONGO_URI || DEFAULT_MONGO_URI,
     frontendOrigins,
-    frontendUrl: env.FRONTEND_URL || frontendOrigins[0] || DEFAULT_FRONTEND_ORIGIN,
+    frontendUrl: env.FRONTEND_URL || env.RENDER_EXTERNAL_URL || frontendOrigins[0] || DEFAULT_FRONTEND_ORIGIN,
     adminEmail: env.ADMIN_EMAIL || '',
     jwtSecret: env.JWT_SECRET || DEFAULT_JWT_SECRET,
     jwtExpiresIn: env.JWT_EXPIRES_IN || DEFAULT_JWT_EXPIRES_IN,
     nodeEnv: env.NODE_ENV || 'development',
+    demoMode: env.DEMO_MODE === 'true',
+    demoUserId: env.DEMO_USER_ID || 'DEMO-EMPLOYEE',
+    demoAdminId: env.DEMO_ADMIN_ID || 'DEMO-ADMIN',
+    demoPassword: env.DEMO_PASSWORD || '',
   };
 }
 
@@ -36,6 +40,10 @@ function validateRuntimeConfig(config) {
 
   if (config.nodeEnv === 'production' && config.jwtSecret.includes('development-only')) {
     errors.push('JWT_SECRET must be set outside development.');
+  }
+
+  if (config.demoMode && config.demoPassword.length < 8) {
+    errors.push('DEMO_PASSWORD must contain at least 8 characters when DEMO_MODE=true.');
   }
 
   if (!/^\d+[smhd]$/.test(String(config.jwtExpiresIn))) {

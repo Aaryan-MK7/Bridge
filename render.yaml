@@ -1,0 +1,27 @@
+services:
+  - type: web
+    name: bridge-demo
+    runtime: node
+    plan: free
+    buildCommand: npm ci && npm run build
+    startCommand: npm run start:server
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_VERSION
+        value: 22.18.0
+      - key: NODE_ENV
+        value: production
+      - key: DEMO_MODE
+        value: "true"
+      - key: DEMO_USER_ID
+        value: DEMO-EMPLOYEE
+      - key: DEMO_ADMIN_ID
+        value: DEMO-ADMIN
+      - key: DEMO_PASSWORD
+        sync: false
+      - key: JWT_SECRET
+        generateValue: true
+      - key: JWT_EXPIRES_IN
+        value: 8h
+      - key: MONGO_URI
+        sync: false

@@ -8,12 +8,16 @@ const {
   connectDatabase,
   disconnectDatabase,
 } = require('./database');
+const { seedDemoData } = require('./scripts/seedDemo');
 
 async function startServer(options = {}) {
   const config = assertRuntimeConfig(options.config || getRuntimeConfig());
   const connect = options.connectDatabase || connectDatabase;
   const disconnect = options.disconnectDatabase || disconnectDatabase;
   await connect({ mongoUri: config.mongoUri });
+  if (config.demoMode) {
+    await seedDemoData({ config });
+  }
   let app;
   let server;
   try {
