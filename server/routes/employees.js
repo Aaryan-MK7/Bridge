@@ -47,6 +47,28 @@ function createEmployeesRouter({
     });
   }));
 
+  router.post('/demo-login', loginLimit, asyncHandler(async (req, res) => {
+    if (!config.demoMode) {
+      throw new AppError(404, 'NOT_FOUND', 'Demo access is not enabled');
+    }
+    requireObject(req.body);
+    const role = requiredString(req.body.role, 'role', { maxLength: 20 });
+    const employeeId = resolveDemoEmployeeId(config, role);
+    if (!employeeId) {
+      throw new AppError(400, 'INVALID_DEMO_ROLE', 'role must be user or admin');
+    }
+    const employee = await Employee.findOne({ employeeId });
+    if (!employee) {
+      throw new AppError(503, 'DEMO_UNAVAILABLE', 'The shared demo identity is unavailable');
+    }
+
+    res.json({
+      success: true,
+      token: tokenService.sign(employee),
+      employee: safeEmployeeDto(employee),
+    });
+  }));
+
   router.post('/forgot-password', recoveryLimit, asyncHandler(async (req, res) => {
     requireObject(req.body);
     const employeeId = requiredString(req.body.employeeId, 'employeeId', { maxLength: 80 });
@@ -427,6 +449,12 @@ function hashResetToken(token) {
   return crypto.createHash('sha256').update(token).digest('hex');
 }
 
+function resolveDemoEmployeeId(config, role) {
+  if (role === 'user') return config.demoUserId;
+  if (role === 'admin') return config.demoAdminId;
+  return null;
+}
+
 async function findEmployeeOrThrow(Employee, employeeId) {
   const employee = await Employee.findOne({ employeeId });
   if (!employee) {
@@ -440,4 +468,5 @@ module.exports = {
   createEmployeesRouter,
   hashResetToken,
   parseEmployeeCsv,
+  resolveDemoEmployeeId,
 };

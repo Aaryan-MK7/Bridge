@@ -25,13 +25,20 @@ export function AuthProvider({ children }) {
 
   useEffect(() => subscribeToUnauthorized(logout), [logout]);
 
-  const login = useCallback(async (credentials) => {
-    const response = await authApi.login(credentials);
+  const establishSession = useCallback((response) => {
     const nextSession = parseLoginResponse(response);
     storeSession(nextSession);
     setSession(nextSession);
     return nextSession.employee;
   }, []);
+
+  const login = useCallback(async (credentials) => (
+    establishSession(await authApi.login(credentials))
+  ), [establishSession]);
+
+  const demoLogin = useCallback(async (role) => (
+    establishSession(await authApi.demoLogin(role))
+  ), [establishSession]);
 
   const updateEmployee = useCallback((employee) => {
     setSession((current) => {
@@ -55,10 +62,11 @@ export function AuthProvider({ children }) {
   const value = useMemo(() => ({
     employee: session?.employee || null,
     isAuthenticated: Boolean(session?.token && session?.employee),
+    demoLogin,
     login,
     logout,
     updateEmployee,
-  }), [login, logout, session, updateEmployee]);
+  }), [demoLogin, login, logout, session, updateEmployee]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

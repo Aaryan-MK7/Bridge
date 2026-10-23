@@ -9,6 +9,7 @@ const {
   parseEmployeeRequestInput,
   validateTemplateDetails,
 } = require('../routes/letterRequests');
+const { resolveDemoEmployeeId } = require('../routes/employees');
 const { createTokenService } = require('../services/tokenService');
 const {
   sanitizeDetails,
@@ -33,6 +34,17 @@ test('JWT contract signs scoped employee claims and rejects tampering', () => {
   assert.equal(claims.authVersion, 3);
   assert.equal(claims.iss, 'bridge-api');
   assert.throws(() => tokens.verify(`${token}tampered`));
+});
+
+test('demo roles resolve only to configured protected identities', () => {
+  const config = {
+    demoUserId: 'DEMO-EMPLOYEE',
+    demoAdminId: 'DEMO-ADMIN',
+  };
+
+  assert.equal(resolveDemoEmployeeId(config, 'user'), 'DEMO-EMPLOYEE');
+  assert.equal(resolveDemoEmployeeId(config, 'admin'), 'DEMO-ADMIN');
+  assert.equal(resolveDemoEmployeeId(config, 'owner'), null);
 });
 
 test('employee serialization never exposes authentication or reset secrets', () => {

@@ -1129,6 +1129,7 @@ tbody tr:last-child td {
   text-align: center;
 }
 
+
 .empty-state {
   min-height: 240px;
   padding: 2rem;
@@ -1652,6 +1653,28 @@ tbody tr:last-child td {
 .auth-back-link {
   font-weight: 700;
 }
+.auth-divider {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  color: var(--color-ink-muted);
+  font-size: 0.7rem;
+  text-align: center;
+}
+
+.auth-divider::before,
+.auth-divider::after {
+  height: 1px;
+  flex: 1;
+  background: var(--color-line);
+  content: "";
+}
+
+.auth-demo-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.7rem;
+}
 
 .auth-help,
 .auth-back-link {
@@ -1888,6 +1911,9 @@ tbody tr:last-child td {
 }
 
 @media (max-width: 480px) {
+  .auth-demo-actions {
+    grid-template-columns: 1fr;
+  }
   .stepper__line {
     width: 26px;
   }

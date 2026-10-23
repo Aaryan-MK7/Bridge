@@ -9,9 +9,15 @@ export default function LoginPage() {
   const [credentials, setCredentials] = useState({ employeeId: '', password: '' });
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  const { login } = useAuth();
+  const [demoRole, setDemoRole] = useState('');
+  const { demoLogin, login } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
+  const completeLogin = (employee) => {
+    const requestedPath = location.state?.from?.pathname;
+    const roleHome = employee.role === 'admin' ? '/admin' : '/employee';
+    navigate(requestedPath || roleHome, { replace: true });
+  };
 
   const handleSubmit = async (event) => {
     event.preventDefault();
@@ -22,13 +28,22 @@ export default function LoginPage() {
         employeeId: credentials.employeeId.trim(),
         password: credentials.password,
       });
-      const requestedPath = location.state?.from?.pathname;
-      const roleHome = employee.role === 'admin' ? '/admin' : '/employee';
-      navigate(requestedPath || roleHome, { replace: true });
+      completeLogin(employee);
     } catch (submitError) {
       setError(submitError.message || 'Unable to sign in. Please try again.');
     } finally {
       setLoading(false);
+    }
+  };
+  const handleDemoLogin = async (role) => {
+    setError('');
+    setDemoRole(role);
+    try {
+      completeLogin(await demoLogin(role));
+    } catch (submitError) {
+      setError(submitError.message || 'Unable to open the demo. Please try again.');
+    } finally {
+      setDemoRole('');
     }
   };
 
@@ -69,9 +84,35 @@ export default function LoginPage() {
           <span>Credentials are managed by HR.</span>
           <Link to="/forgot-password">Forgot password?</Link>
         </div>
-        <Button className="button--full" loading={loading} type="submit">Sign in</Button>
+        <Button
+          className="button--full"
+          disabled={Boolean(demoRole)}
+          loading={loading}
+          type="submit"
+        >
+          Sign in
+        </Button>
+        <div className="auth-divider"><span>or explore the shared demo</span></div>
+        <div className="auth-demo-actions">
+          <Button
+            disabled={loading || Boolean(demoRole)}
+            loading={demoRole === 'user'}
+            onClick={() => handleDemoLogin('user')}
+            variant="secondary"
+          >
+            View as employee
+          </Button>
+          <Button
+            disabled={Boolean(demoRole)}
+            loading={demoRole === 'admin'}
+            onClick={() => handleDemoLogin('admin')}
+            variant="secondary"
+          >
+            View as administrator
+          </Button>
+        </div>
       </form>
-      <p className="auth-help">Need access? Contact your HR administrator.</p>
+      <p className="auth-help">Demo accounts use shared seeded data and protected profiles.</p>
     </AuthLayout>
   );
 }

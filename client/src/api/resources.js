@@ -7,6 +7,10 @@ export const authApi = {
     method: 'POST',
     body: credentials,
   }),
+  demoLogin: (role) => apiRequest('/api/employees/demo-login', {
+    method: 'POST',
+    body: { role },
+  }),
   forgotPassword: (payload) => apiRequest('/api/employees/forgot-password', {
     method: 'POST',
     body: payload,
