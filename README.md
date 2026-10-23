@@ -1,8 +1,10 @@
 # Bridge
 
-[![Project preview](https://github.com/Aaryan-MK7/Bridge/actions/workflows/pages.yml/badge.svg)](https://aaryan-mk7.github.io/Bridge/)
+[![Live demo](https://img.shields.io/website?url=https%3A%2F%2Fbridge-demo-awhf.onrender.com%2Fhealth&label=live%20demo)](https://bridge-demo-awhf.onrender.com)
 
-**[Open the public project preview →](https://aaryan-mk7.github.io/Bridge/)**
+**[Open the live application →](https://bridge-demo-awhf.onrender.com)** · [View the static walkthrough](https://aaryan-mk7.github.io/Bridge/)
+
+Choose **View as employee** or **View as administrator** for passwordless access to shared seeded data. Demo identities are protected from profile, password, role, and deletion changes. The free Render service may take about a minute to wake after inactivity.
 
 Bridge is an internal employee-letter workflow for collecting structured requests, generating documents, routing decisions through HR, and optionally sending approved letters through DocuSign. It provides separate employee and administrator workspaces backed by one authenticated Express API and MongoDB.
 
@@ -145,6 +147,7 @@ Public process and authentication routes:
 - `GET /` — basic API response.
 - `GET /health` — database-aware health response.
 - `POST /api/employees/login`
+- `POST /api/employees/demo-login` — available only when `DEMO_MODE=true`.
 - `POST /api/employees/forgot-password`
 - `POST /api/employees/reset-password`
 - `GET /api/docusign/callback` — validates one-time OAuth state before exchanging a provider code.
@@ -200,6 +203,8 @@ Required or core values in `server/.env`:
 - `FRONTEND_URL` — canonical SPA origin used for reset and provider return URLs.
 - `JWT_SECRET` — at least 32 characters; the development placeholder is rejected in production.
 - `JWT_EXPIRES_IN` — duration such as `30m`, `8h`, or `7d`.
+
+Hosted demos can opt in with `DEMO_MODE=true`, `DEMO_USER_ID`, `DEMO_ADMIN_ID`, and a private `DEMO_PASSWORD`. Demo mode seeds and protects those two shared identities; leave it disabled for ordinary deployments.
 
 Optional email values:
 
